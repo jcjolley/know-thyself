@@ -6,11 +6,34 @@ Extend the extraction pipeline to capture **all 15+ psychological axes** across 
 ## Problem Statement
 Phase 2 implements extraction for a subset of axes (Maslow, Support-Seeking Style, Values, Challenges, Goals). However:
 - **Tier 1 gaps**: Life Situation and Immediate Intent not captured
-- **Tier 2 gaps**: Moral Foundations not captured; Goals not persisted properly
+- **Tier 2 gaps**: Moral Foundations not captured; Goals extracted but **not persisted** (see `extraction.ts:111-185` - only handles values, challenges, maslow)
 - **Tier 3 missing entirely**: Big Five, Risk Tolerance, Motivation Style
 - **Tier 4 missing entirely**: Attachment Style, Locus of Control, Temporal Orientation, Growth Mindset, and 4 additional axes
+- **Type mismatch**: Current `support_seeking_style` uses different enum values than psychological literature
 
 The extraction infrastructure should capture all signals from the start. Low-confidence signals are stored but excluded from context until they mature.
+
+## Breaking Changes
+
+This phase introduces breaking changes that require migration:
+
+1. **`SupportSeekingStyle` type change** (`types.ts:65`):
+   - Old: `'problem_solving' | 'emotional_support' | 'information' | 'unclear'`
+   - New: `'emotional_support' | 'instrumental_support' | 'informational_support' | 'validation_support' | 'independence' | 'unclear'`
+   - Migration: Map `problem_solving` → `instrumental_support`, `information` → `informational_support`
+   - Note: `'unclear'` is retained for cases where extraction cannot determine style (filtered out before persistence)
+
+2. **`assembleContext` signature change** (`context.ts:13`):
+   - Old: `assembleContext(currentMessage, recentMessages)`
+   - New: `assembleContext(currentMessage, recentMessages, conversationId)`
+   - Callers to update: `src/main/ipc.ts:44`, `src/main/ipc.ts:71`
+
+3. **`applyExtractionToProfile` signature change** (`extraction.ts:111`):
+   - Old: `applyExtractionToProfile(extractionId, extraction)`
+   - New: `applyExtractionToProfile(extractionId, extraction, messageId, conversationId)`
+   - Callers to update: `src/main/extraction.ts:60`
+
+4. **Schema migration required**: Add unique index on `psychological_signals.dimension`
 
 ## Goals
 - [ ] Extract and persist Life Situation signals (Tier 1)
@@ -181,6 +204,18 @@ The extraction infrastructure should capture all signals from the start. Low-con
 - [ ] Given user tends to suppress emotions, when extraction runs, then emotional_regulation is "suppression"
 - [ ] Given user expresses "I can figure this out", when extraction runs, then self_efficacy is "high"
 
+### US-215: Sparse Extraction Handling
+**As a** system
+**I want** to gracefully handle messages with few or no psychological signals
+**So that** the extraction pipeline doesn't fail or produce noise on neutral messages
+
+**Acceptance Criteria:**
+- [ ] Given user sends "What's the weather like?", when extraction runs, then extraction completes with mostly null/empty fields (no errors)
+- [ ] Given user sends a neutral greeting, when extraction runs, then no new rows are added to `psychological_signals` table
+- [ ] Given extraction returns null for optional fields, when `applyExtractionToProfile` runs, then no database errors occur
+- [ ] Given extraction returns empty arrays for signal lists, when validation runs, then extraction is marked as valid
+- [ ] Given a conversation with mixed signal-rich and signal-poor messages, when profile is queried, then only signal-rich extractions contribute to confidence scores
+
 ### US-214: Developer Profile Debug Page
 **As a** developer
 **I want** a debug page that displays all extracted user profile data
@@ -250,14 +285,136 @@ Signals: 12 | Values: 5 | Challenges: 3 | Goals: 2
 | `src/shared/types.ts` | Add `FullProfileData` interface |
 | `src/renderer/App.tsx` | Add route/toggle to access debug page |
 
+**IPC Channel:** `debug:getFullProfile`
+
+**Request:** None (no parameters)
+
+**Response Type (`FullProfileData`):**
+```typescript
+export interface FullProfileData {
+    counts: {
+        signals: number;
+        values: number;
+        challenges: number;
+        goals: number;
+    };
+    lifeSituation: Record<string, { value: string; confidence: number; evidenceCount: number }>;
+    psychologicalSignals: {
+        tier1: PsychologicalSignalDisplay[];
+        tier2: PsychologicalSignalDisplay[];
+        tier3: PsychologicalSignalDisplay[];
+        tier4: PsychologicalSignalDisplay[];
+    };
+    values: ValueDisplay[];
+    challenges: ChallengeDisplay[];
+    goals: GoalDisplay[];
+    maslowSignals: MaslowSignalDisplay[];
+}
+
+export interface PsychologicalSignalDisplay {
+    dimension: string;
+    value: string;
+    confidence: number;
+    evidenceCount: number;
+    lastUpdated: string;
+    belowThreshold: boolean;  // true if confidence < 0.5
+}
+
+export interface ValueDisplay {
+    name: string;
+    description: string | null;
+    confidence: number;
+    evidenceCount: number;
+    quotes: string[];  // Supporting evidence
+}
+
+export interface ChallengeDisplay {
+    description: string;
+    status: string;
+    mentionCount: number;
+}
+
+export interface GoalDisplay {
+    description: string;
+    status: string;
+    timeframe: string | null;
+    firstStated: string;
+    lastMentioned: string | null;
+}
+
+export interface MaslowSignalDisplay {
+    level: string;
+    signalType: string;
+    description: string | null;
+    createdAt: string;
+}
+```
+
+**Note:** US-214 is a developer tool and could be implemented as a separate PRD if desired. It has no dependencies on other user stories in this PRD.
+
 ---
 
 ## Phases
 
+### Phase 2.5.0: Schema Migration
+
+**File:** `src/main/db/sqlite.ts` (add to SCHEMA)
+
+Two schema changes are required:
+
+#### 1. Add `timeframe` column to `goals` table
+The existing `goals` table is missing the `timeframe` column that the extraction types expect:
+
+```sql
+-- Add timeframe column to existing goals table
+ALTER TABLE goals ADD COLUMN timeframe TEXT
+    CHECK (timeframe IS NULL OR timeframe IN ('short_term', 'medium_term', 'long_term'));
+```
+
+**Note:** SQLite's ALTER TABLE doesn't support adding CHECK constraints directly. For a new install, modify the CREATE TABLE. For existing installs, the CHECK constraint is optional (validation happens in application code).
+
+#### 2. Add unique index for `ON CONFLICT(dimension)` to work
+
+```sql
+-- Add after existing indexes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_psych_signals_dimension ON psychological_signals(dimension);
+```
+
+**Verification:** After migration, confirm changes:
+```sql
+-- Check index exists
+SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='psychological_signals';
+
+-- Check timeframe column exists
+PRAGMA table_info(goals);
+```
+
+---
+
 ### Phase 2.5.1: Extended Extraction Types
 
-#### 2.5.1.1 New Types
-**File:** `src/shared/types.ts` (add)
+#### 2.5.1.1 Type Modifications and Additions
+**File:** `src/shared/types.ts`
+
+**Modify existing `ExtractedGoal` interface** (add `status` field):
+
+```typescript
+export interface ExtractedGoal {
+    description: string;
+    timeframe?: 'short_term' | 'medium_term' | 'long_term';
+    status?: 'stated' | 'in_progress' | 'achieved' | 'abandoned';  // NEW
+    quote: string;
+}
+```
+
+**Modify existing `SupportSeekingStyle` in `ExtractionResult`** (line 65):
+
+```typescript
+// Replace the old enum with:
+support_seeking_style?: SupportSeekingStyle;  // Use the new type below
+```
+
+**Add new types:**
 
 ```typescript
 // =============================================================================
@@ -336,7 +493,8 @@ export type SupportSeekingStyle =
     | 'instrumental_support'
     | 'informational_support'
     | 'validation_support'
-    | 'independence';
+    | 'independence'
+    | 'unclear';  // Used when extraction can't determine style
 
 // =============================================================================
 // Tier 3: Personality & Disposition
@@ -789,13 +947,19 @@ export function buildExtractionPrompt(message: string, context?: string): string
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from './sqlite.js';
 import type {
-    ExtendedExtractionResult,
     ExtractedLifeSituation,
     ExtractedIntent,
     ExtractedMoralSignal,
     ExtractedGoal,
+    ExtractedBigFiveSignal,
+    ExtractedRiskSignal,
+    ExtractedMotivationSignal,
+    ExtractedAttachmentSignal,
+    ExtractedLocusSignal,
+    ExtractedTemporalSignal,
+    ExtractedMindsetSignal,
+    ExtractedTier4Signals,
     Goal,
-    PsychologicalSignal,
     SupportSeekingStyle,
 } from '../../shared/types.js';
 
@@ -947,9 +1111,9 @@ export function updateGoals(
             // Insert new goal
             const id = uuidv4();
             db.prepare(`
-                INSERT INTO goals (id, description, status, first_stated, last_mentioned)
-                VALUES (?, ?, ?, ?, ?)
-            `).run(id, goal.description, goal.status || 'stated', now, now);
+                INSERT INTO goals (id, description, status, timeframe, first_stated, last_mentioned)
+                VALUES (?, ?, ?, ?, ?, ?)
+            `).run(id, goal.description, goal.status || 'stated', goal.timeframe || null, now, now);
 
             // Store evidence
             if (goal.quote) {
@@ -1234,7 +1398,12 @@ export function getCompleteProfile(): CompleteProfile {
 #### 2.5.4.1 Extended Extraction Application
 **File:** `src/main/extraction.ts` (modify applyExtractionToProfile)
 
-Replace the `applyExtractionToProfile` function:
+Replace the `applyExtractionToProfile` function.
+
+**Note (US-215 Sparse Extraction):** This function handles sparse extractions gracefully:
+- All array fields use `|| []` fallback and length checks before iteration
+- All optional fields use conditional checks (`if (extraction.field)`) before processing
+- Empty extractions result in no database writes (correct behavior)
 
 ```typescript
 import {
@@ -1243,12 +1412,20 @@ import {
     updateMoralFoundations,
     updateGoals,
     updateSupportSeekingStyle,
+    updateBigFiveSignals,
+    updateRiskTolerance,
+    updateMotivationStyle,
+    updateAttachmentStyle,
+    updateLocusOfControl,
+    updateTemporalOrientation,
+    updateGrowthMindset,
+    updateTier4Signals,
 } from './db/profile.js';
-import type { ExtendedExtractionResult } from '../shared/types.js';
+import type { CompleteExtractionResult } from '../shared/types.js';
 
 async function applyExtractionToProfile(
     extractionId: string,
-    extraction: ExtendedExtractionResult,
+    extraction: CompleteExtractionResult,
     messageId: string,
     conversationId: string
 ): Promise<void> {
@@ -1393,6 +1570,103 @@ async function applyExtractionToProfile(
 }
 ```
 
+#### 2.5.4.2 Extended Validation
+**File:** `src/main/extraction.ts` (modify `validateExtraction`)
+
+Extend quote validation to include new signal types:
+
+```typescript
+export function validateExtraction(jsonStr: string, originalMessage: string): ValidationResult {
+    const errors: string[] = [];
+
+    // Layer 1: Parse JSON
+    let extraction: CompleteExtractionResult;
+    try {
+        extraction = JSON.parse(jsonStr);
+    } catch {
+        return { valid: false, errors: ['Invalid JSON format'] };
+    }
+
+    // Layer 2: Verify quotes exist in original message
+    const normalizedMessage = originalMessage.toLowerCase().replace(/\s+/g, ' ');
+
+    const allQuotes = [
+        ...(extraction.raw_quotes || []),
+        ...(extraction.values?.map(v => v.quote) || []),
+        ...(extraction.challenges?.map(c => c.quote) || []),
+        ...(extraction.goals?.map(g => g.quote) || []),
+        ...(extraction.maslow_signals?.map(m => m.quote) || []),
+        // NEW: Extended signal quotes
+        ...(extraction.moral_signals?.map(m => m.quote) || []),
+        ...(extraction.big_five_signals?.map(b => b.quote) || []),
+        extraction.life_situation?.work?.quote,
+        extraction.life_situation?.relationship?.quote,
+        extraction.life_situation?.family?.quote,
+        extraction.life_situation?.living?.quote,
+        extraction.immediate_intent?.quote,
+        extraction.risk_tolerance?.quote,
+        extraction.motivation_style?.quote,
+        extraction.attachment_signals?.quote,
+        extraction.locus_of_control?.quote,
+        extraction.temporal_orientation?.quote,
+        extraction.growth_mindset?.quote,
+        extraction.tier4_signals?.change_readiness?.quote,
+        extraction.tier4_signals?.stress_response?.quote,
+        extraction.tier4_signals?.emotional_regulation?.quote,
+        extraction.tier4_signals?.self_efficacy?.quote,
+    ].filter(Boolean) as string[];
+
+    for (const quote of allQuotes) {
+        const normalizedQuote = quote.toLowerCase().replace(/\s+/g, ' ').trim();
+        if (normalizedQuote.length > 10 && !normalizedMessage.includes(normalizedQuote)) {
+            errors.push(`Quote not found: "${quote.slice(0, 50)}..."`);
+        }
+    }
+
+    return { valid: errors.length === 0, errors };
+}
+```
+
+#### 2.5.4.3 Update runExtraction Call Site
+**File:** `src/main/extraction.ts` (modify `runExtraction`)
+
+Pass `messageId` and `conversationId` through to `applyExtractionToProfile`:
+
+```typescript
+export async function runExtraction(messageId: string, conversationId: string): Promise<Extraction> {
+    // ... existing code ...
+
+    // If valid, apply to profile
+    if (validation.valid) {
+        await applyExtractionToProfile(
+            id,
+            JSON.parse(extractionJson) as CompleteExtractionResult,
+            messageId,
+            conversationId
+        );
+    }
+
+    // ... rest unchanged ...
+}
+```
+
+#### 2.5.4.4 Update IPC Callers
+**File:** `src/main/ipc.ts` (modify chat handlers)
+
+Update extraction calls to pass conversationId:
+
+```typescript
+// Line ~53 (chat:send handler)
+runExtraction(userMessage.id, conversation.id).catch(err => {
+    console.error('Extraction failed:', err);
+});
+
+// Line ~86 (chat:stream handler)
+runExtraction(userMessage.id, conversation.id).catch(err => {
+    console.error('Extraction failed:', err);
+});
+```
+
 ---
 
 ### Phase 2.5.5: Extended Context Assembly
@@ -1410,7 +1684,9 @@ import {
     getSupportSeekingStyle,
     getCurrentIntent,
     getCompleteProfile,
+    type CompleteProfile,
 } from './db/profile.js';
+import type { Goal } from '../shared/types.js';
 
 // Minimum confidence to include a signal in context
 // If a signal isn't reliable enough to use, it should have low confidence -
@@ -1714,12 +1990,13 @@ export function buildStyleGuidance(supportStyle: string | null, intent: string |
 ### Files to Modify
 | File | Changes |
 |------|---------|
-| `src/shared/types.ts` | Add extended extraction types, Goal, PsychologicalSignal, FullProfileData |
-| `src/main/prompts/extraction.ts` | Expand prompt for all Tier 1-2 axes |
-| `src/main/extraction.ts` | Call new profile update functions |
-| `src/main/context.ts` | Include life situation, goals, moral foundations, intent |
+| `src/shared/types.ts` | Modify `ExtractedGoal` (add status), modify `SupportSeekingStyle` enum, add extended extraction types, Goal, FullProfileData |
+| `src/main/db/sqlite.ts` | Add unique index on `psychological_signals.dimension` |
+| `src/main/prompts/extraction.ts` | Expand prompt for all Tier 1-4 axes |
+| `src/main/extraction.ts` | Update `runExtraction` to pass messageId/conversationId, update `applyExtractionToProfile` signature, extend `validateExtraction` for new signal types |
+| `src/main/context.ts` | Add `conversationId` parameter, include life situation, goals, moral foundations, intent |
 | `src/main/prompts/response.ts` | Add style guidance based on support style and intent |
-| `src/main/ipc.ts` | Pass conversationId to extraction, add `debug:getFullProfile` handler |
+| `src/main/ipc.ts` | Pass `conversation.id` to `assembleContext` (lines 44, 71), pass messageId/conversationId to extraction, add `debug:getFullProfile` handler |
 | `src/preload/index.ts` | Expose `debug.getFullProfile` |
 | `src/renderer/App.tsx` | Add route/toggle to access debug page |
 
@@ -1727,7 +2004,11 @@ export function buildStyleGuidance(supportStyle: string | null, intent: string |
 
 ## Database Usage
 
-This phase uses existing tables - no schema changes needed:
+This phase requires two schema changes (see Phase 2.5.0):
+1. Add `timeframe` column to `goals` table
+2. Add unique index `idx_psych_signals_dimension` on `psychological_signals(dimension)`
+
+Tables used:
 
 | Table | Usage |
 |-------|-------|
@@ -1781,45 +2062,54 @@ The `psychological_signals` table's flexible `dimension`/`value` structure accom
 16. [ ] Send "I'm just not good at math, never have been" → `growth_mindset` = "fixed"
 17. [ ] Send "I think I'm ready to finally make this change" → `change_readiness` = "preparation"
 
-### Sparse Extraction
+### Sparse Extraction (US-215)
 18. [ ] Send "What's the weather like?" → Extraction returns with mostly null/empty fields (no errors)
 19. [ ] Send neutral message → No new rows added to `psychological_signals` table
 20. [ ] Extraction service handles null fields gracefully without throwing
+21. [ ] Empty arrays in extraction result don't cause validation failures
 
 ### Context Assembly
-21. [ ] Signal with confidence >= 0.5 appears in context summary
-22. [ ] Signal with confidence < 0.5 does NOT appear in context summary
-23. [ ] Check response with support_style="emotional_support" → Response leads with validation
+22. [ ] Signal with confidence >= 0.5 appears in context summary
+23. [ ] Signal with confidence < 0.5 does NOT appear in context summary
+24. [ ] Check response with support_style="emotional_support" → Response leads with validation
 
 ### Developer Debug Page (US-214)
-24. [ ] Navigate to debug page → Page loads with profile data grouped by section
-25. [ ] View psychological signals → Each shows dimension, value, confidence, evidence count
-26. [ ] View values section → Shows all extracted values with quotes
-27. [ ] View challenges section → Shows active challenges with mention counts
-28. [ ] View goals section → Shows all goals with status and timeframe
-29. [ ] Click Refresh button → Data reloads without page reload
-30. [ ] View low-confidence items → Items below 0.5 are visually distinguished (grayed)
-31. [ ] View header counts → Shows totals for signals, values, challenges, goals
-32. [ ] Empty profile → Page displays gracefully with "No data yet" messages
+25. [ ] Navigate to debug page → Page loads with profile data grouped by section
+26. [ ] View psychological signals → Each shows dimension, value, confidence, evidence count
+27. [ ] View values section → Shows all extracted values with quotes
+28. [ ] View challenges section → Shows active challenges with mention counts
+29. [ ] View goals section → Shows all goals with status and timeframe
+30. [ ] Click Refresh button → Data reloads without page reload
+31. [ ] View low-confidence items → Items below 0.5 are visually distinguished (grayed)
+32. [ ] View header counts → Shows totals for signals, values, challenges, goals
+33. [ ] Empty profile → Page displays gracefully with "No data yet" messages
 
 ---
 
 ## Implementation Order
 
-1. Add extended types to `src/shared/types.ts`
-2. Create `src/main/db/profile.ts` with profile update functions
-3. Update `src/main/prompts/extraction.ts` with extended prompt
-4. Update `src/main/extraction.ts` to call new profile functions
-5. Update `src/main/context.ts` to include extended profile data
-6. Update `src/main/prompts/response.ts` with style guidance
-7. Update `src/main/ipc.ts` to pass conversationId through extraction chain
-8. Build developer debug page (US-214):
-   a. Add `debug:getFullProfile` IPC handler
-   b. Expose in preload
-   c. Create `DebugProfile.tsx` component
-   d. Add navigation toggle to `App.tsx`
-9. Write tests
-10. Run verification checklist
+1. **Schema migration**: Add `timeframe` column to `goals` table and unique index to `psychological_signals.dimension` in `src/main/db/sqlite.ts`
+2. **Type modifications**: Update `ExtractedGoal` and `SupportSeekingStyle` in `src/shared/types.ts`
+3. **Add extended types** to `src/shared/types.ts` (new interfaces)
+4. **Create `src/main/db/profile.ts`** with profile update functions
+5. **Update `src/main/prompts/extraction.ts`** with extended prompt
+6. **Update `src/main/extraction.ts`**:
+   - Extend `validateExtraction` for new signal types
+   - Update `runExtraction` signature to accept `conversationId`
+   - Update `applyExtractionToProfile` signature and implementation
+7. **Update `src/main/ipc.ts`**:
+   - Pass `conversation.id` to `assembleContext` (lines 44, 71)
+   - Pass `conversation.id` to `runExtraction` (lines 53, 86)
+8. **Update `src/main/context.ts`**: Add `conversationId` parameter, include extended profile data
+9. **Update `src/main/prompts/response.ts`** with style guidance
+10. **Build developer debug page (US-214)** (optional, can be deferred):
+    a. Add `FullProfileData` and related types to `src/shared/types.ts`
+    b. Add `debug:getFullProfile` IPC handler
+    c. Expose in preload
+    d. Create `DebugProfile.tsx` component
+    e. Add navigation toggle to `App.tsx`
+11. **Write tests** (including sparse extraction tests for US-215)
+12. **Run verification checklist**
 
 ---
 
@@ -1834,7 +2124,7 @@ The `psychological_signals` table's flexible `dimension`/`value` structure accom
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Extraction prompt too long | Higher latency/cost | Keep Haiku model, monitor token usage, consider chunking |
+| Extraction prompt size | Minimal - ~3K tokens is <2% of Haiku's 200K context | Monitor cost (~$0.005-0.01 per extraction with Haiku 4.5) |
 | Life situation extraction too aggressive | Privacy concerns | Only extract explicitly stated facts |
 | Intent detection wrong | Mismatched response style | Allow user to correct, track accuracy |
 | Moral foundation signals noisy | Bad advice framing | Same MIN_CONFIDENCE (0.5) threshold as all signals |
