@@ -41,7 +41,7 @@ CREATE TABLE extractions (
 );
 
 -- Structured profile data (derived from extractions)
-CREATE TABLE values (
+CREATE TABLE user_values (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,  -- e.g., "family_connection"
     description TEXT,
@@ -126,8 +126,8 @@ CREATE TABLE evidence (
 #### LanceDB Collections
 
 ```typescript
-// Embedding configuration - voyage-4-nano with Matryoshka dimensions
-const EMBEDDING_DIMENSIONS = 1024;  // Can be 256, 512, 1024, or 2048
+// Embedding configuration - voyage-4-nano via ONNX Runtime
+const EMBEDDING_DIMENSIONS = 2048;  // Native output dimension
 
 // Message embeddings - for semantic search over conversation history
 interface MessageEmbedding {
@@ -149,7 +149,7 @@ interface InsightEmbedding {
 }
 ```
 
-**Note:** Thanks to voyage-4-nano's Matryoshka training, you can change `EMBEDDING_DIMENSIONS` without re-indexing - just truncate existing vectors. However, for consistency, pick a dimension at setup and stick with it.
+**Note:** The ONNX model outputs fixed 2048-dimension vectors. While the original voyage-4-nano supports Matryoshka dimensions (256/512/1024/2048), the ONNX conversion outputs the full 2048 dimensions.
 
 #### Key Design Decisions
 
@@ -244,44 +244,53 @@ async function processExtraction(messageId: string, extraction: unknown): Promis
 
 #### Embedding Model
 
-**`voyage-4-nano`** (local, open weights from Voyage AI / MongoDB)
+**`voyage-4-nano`** (local ONNX, from community conversion)
 
 | Spec | Value |
 |------|-------|
-| Dimensions | 1024 (configurable: 256, 512, 1024, 2048 via Matryoshka) |
+| Dimensions | 2048 (native output) |
 | Quality | Outperforms voyage-3.5-lite, optimized for Claude |
-| Library | `@huggingface/transformers` |
+| Runtime | `onnxruntime-node` + `tokenizers` |
+| Model Source | `thomasht86/voyage-4-nano-ONNX` (FP32, ~1.3GB) |
+| Tokenizer Source | `voyageai/voyage-4-nano` (official) |
 | Provider | Voyage AI (Anthropic-recommended, now part of MongoDB) |
-| Weights | Open, available on Hugging Face |
+
+> **Implementation Note:** The official `voyageai/voyage-4-nano` model is not available in ONNX format.
+> We use the community ONNX conversion for model weights and the official tokenizer.
 
 **Why voyage-4-nano over BGE:**
 - **Claude-aligned**: Voyage AI is Anthropic's recommended embedding provider. Semantic space better matches how Claude understands concepts.
 - **Shared embedding space**: Can upgrade to voyage-4-large later without re-indexing existing data.
-- **Matryoshka dimensions**: Can trade off quality vs speed by using smaller dimensions.
-- **Local & private**: Open weights run locally, no API calls needed.
+- **Local & private**: Runs locally via ONNX Runtime, no API calls needed.
 
 Runs locally in Node.js main process. No external API calls. Privacy preserved.
+Model files auto-download to `{userData}/models/voyage-4-nano/` on first run.
 
 ```typescript
-import { pipeline } from '@huggingface/transformers';
+import * as ort from 'onnxruntime-node';
+import { Tokenizer } from 'tokenizers';
 
-// Initialize once at startup
-const embedder = await pipeline('feature-extraction', 'voyageai/voyage-4-nano');
+// Initialize once at startup (downloads model if needed)
+const session = await ort.InferenceSession.create(modelPath);
+const tokenizer = await Tokenizer.fromFile(tokenizerPath);
 
-async function embed(text: string, dimensions: number = 1024): Promise<number[]> {
-    const result = await embedder(text, { pooling: 'mean', normalize: true });
-    // Matryoshka: truncate to desired dimensions
-    return Array.from(result.data).slice(0, dimensions);
+async function embed(text: string, inputType: 'query' | 'document' = 'document'): Promise<number[]> {
+    const inputText = inputType === 'query'
+        ? `Represent the query for retrieving supporting documents: ${text}`
+        : text;
+
+    const encoding = await tokenizer.encode(inputText);
+    const inputIds = encoding.getIds();
+    const attentionMask = encoding.getAttentionMask();
+
+    const results = await session.run({
+        input_ids: new ort.Tensor('int64', BigInt64Array.from(inputIds.map(BigInt)), [1, inputIds.length]),
+        attention_mask: new ort.Tensor('int64', BigInt64Array.from(attentionMask.map(BigInt)), [1, attentionMask.length]),
+    });
+
+    return Array.from(results.embeddings.data as Float32Array);
 }
 ```
-
-**Dimension Selection:**
-
-| Use Case | Dimensions | Trade-off |
-|----------|------------|-----------|
-| High fidelity (default) | 1024 | Best quality, moderate speed |
-| Faster search | 512 | Slight quality loss, 2x faster |
-| On-device / mobile | 256 | Acceptable quality, 4x faster |
 
 #### What Gets Embedded
 
@@ -1196,7 +1205,7 @@ async function synthesizeProfileNarrative(): Promise<NarrativeSummary> {
 - [ ] IPC via contextBridge works
 - [ ] SQLite database initializes (better-sqlite3)
 - [ ] LanceDB initializes (vectordb)
-- [ ] Embedding model loads (@xenova/transformers)
+- [ ] Embedding model loads (onnxruntime-node + tokenizers)
 - [ ] Can send a message and get a response from Claude API (@anthropic-ai/sdk)
 
 ---
