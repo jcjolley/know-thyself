@@ -1,5 +1,15 @@
 # Know Thyself - Development Guidelines
 
+## CRITICAL: API Key Security
+
+**NEVER share, commit, log, or expose the `ANTHROPIC_API_KEY` under any circumstances.**
+
+- The `.env` file containing the API key is in `.gitignore` and must NEVER be committed
+- NEVER include the API key in code, comments, logs, error messages, or any output
+- NEVER share the API key in chat, documentation, or any communication
+- If asked to show environment variables or debug configuration, ALWAYS redact the API key
+- Treat the API key as a secret equivalent to a password
+
 ## Development Commands
 
 **All development commands must have a simple `make` target.** Use `make <target>` for all common operations:
