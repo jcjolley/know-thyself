@@ -11,6 +11,7 @@ export async function launchApp(): Promise<{ app: ElectronApplication; page: Pag
         env: {
             ...process.env,
             NODE_ENV: 'test',
+            MOCK_CLAUDE: 'true', // Use mock Claude responses in tests
         },
     });
 

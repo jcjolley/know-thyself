@@ -36,6 +36,29 @@ export async function initLanceDB(): Promise<void> {
         await messagesTable.delete('id = "__schema__"');
     } else {
         messagesTable = await connection.openTable('messages');
+        // Check if existing table has correct vector dimensions
+        try {
+            const schema = await messagesTable.schema;
+            const vectorField = schema.fields.find((f: { name: string }) => f.name === 'vector');
+            // FixedSizeList type has listSize property indicating dimensions
+            const existingDims = vectorField?.type?.listSize;
+            if (existingDims && existingDims !== EMBEDDING_DIMENSIONS) {
+                console.log(`Messages table has wrong dimensions (${existingDims} vs ${EMBEDDING_DIMENSIONS}), recreating...`);
+                await connection.dropTable('messages');
+                messagesTable = await connection.createTable('messages', [
+                    {
+                        id: '__schema__',
+                        vector: new Array(EMBEDDING_DIMENSIONS).fill(0),
+                        content: '',
+                        role: 'user' as const,
+                        created_at: new Date().toISOString(),
+                    },
+                ]);
+                await messagesTable.delete('id = "__schema__"');
+            }
+        } catch (err) {
+            console.warn('Could not verify messages table schema:', err);
+        }
     }
 
     // Initialize insights table
@@ -54,6 +77,29 @@ export async function initLanceDB(): Promise<void> {
         await insightsTable.delete('id = "__schema__"');
     } else {
         insightsTable = await connection.openTable('insights');
+        // Check if existing table has correct vector dimensions
+        try {
+            const schema = await insightsTable.schema;
+            const vectorField = schema.fields.find((f: { name: string }) => f.name === 'vector');
+            const existingDims = vectorField?.type?.listSize;
+            if (existingDims && existingDims !== EMBEDDING_DIMENSIONS) {
+                console.log(`Insights table has wrong dimensions (${existingDims} vs ${EMBEDDING_DIMENSIONS}), recreating...`);
+                await connection.dropTable('insights');
+                insightsTable = await connection.createTable('insights', [
+                    {
+                        id: '__schema__',
+                        vector: new Array(EMBEDDING_DIMENSIONS).fill(0),
+                        insight_type: 'value' as const,
+                        content: '',
+                        source_id: '',
+                        created_at: new Date().toISOString(),
+                    },
+                ]);
+                await insightsTable.delete('id = "__schema__"');
+            }
+        } catch (err) {
+            console.warn('Could not verify insights table schema:', err);
+        }
     }
 
     console.log('LanceDB initialized');
@@ -79,6 +125,11 @@ export async function searchSimilarMessages(
     limit: number = 5
 ): Promise<MessageEmbedding[]> {
     const table = getMessagesTable();
+    // Check if table has any rows before searching
+    const count = await table.countRows();
+    if (count === 0) {
+        return [];
+    }
     const results = await table.search(vector).limit(limit).execute();
     return results as unknown as MessageEmbedding[];
 }
@@ -93,6 +144,11 @@ export async function searchSimilarInsights(
     limit: number = 5
 ): Promise<InsightEmbedding[]> {
     const table = getInsightsTable();
+    // Check if table has any rows before searching
+    const count = await table.countRows();
+    if (count === 0) {
+        return [];
+    }
     const results = await table.search(vector).limit(limit).execute();
     return results as unknown as InsightEmbedding[];
 }

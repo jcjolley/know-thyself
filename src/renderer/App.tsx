@@ -7,13 +7,40 @@ interface AppStatus {
     error: string | null;
 }
 
+interface Message {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    created_at: string;
+}
+
 export default function App() {
-    const [message, setMessage] = useState('');
-    const [response, setResponse] = useState('');
+    const [input, setInput] = useState('');
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [streamingResponse, setStreamingResponse] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [status, setStatus] = useState<AppStatus | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    // Scroll to bottom when messages change
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages, streamingResponse]);
+
+    // Load message history on mount
+    useEffect(() => {
+        const loadHistory = async () => {
+            try {
+                const history = await window.api.messages.history() as Message[];
+                setMessages(history);
+            } catch (err) {
+                console.error('Failed to load history:', err);
+            }
+        };
+        loadHistory();
+    }, []);
 
     // Poll for app status
     useEffect(() => {
@@ -35,33 +62,51 @@ export default function App() {
     }, [error]);
 
     const handleSend = useCallback(async () => {
-        if (!message.trim() || isLoading) return;
+        if (!input.trim() || isLoading) return;
 
+        const userMessage = input.trim();
         setIsLoading(true);
-        setResponse('');
+        setStreamingResponse('');
         setError(null);
+        setInput('');
+
+        // Optimistically add user message to UI
+        const tempUserMessage: Message = {
+            id: `temp-${Date.now()}`,
+            role: 'user',
+            content: userMessage,
+            created_at: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, tempUserMessage]);
 
         // Set up streaming listeners
         window.api.chat.removeAllListeners();
 
         window.api.chat.onChunk((chunk: string) => {
-            setResponse(prev => prev + chunk);
+            setStreamingResponse(prev => prev + chunk);
         });
 
         window.api.chat.onDone(() => {
             setIsLoading(false);
+            // Reload history to get persisted messages with proper IDs
+            window.api.messages.history().then((history) => {
+                setMessages(history as Message[]);
+                setStreamingResponse('');
+            });
             inputRef.current?.focus();
         });
 
         window.api.chat.onError((err: string) => {
             setError(`Error: ${err}`);
             setIsLoading(false);
+            setStreamingResponse('');
+            // Remove optimistic user message on error
+            setMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
         });
 
         // Start streaming
-        window.api.chat.stream(message);
-        setMessage('');
-    }, [message, isLoading]);
+        window.api.chat.stream(userMessage);
+    }, [input, isLoading]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -71,24 +116,34 @@ export default function App() {
     };
 
     return (
-        <div style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
-            <h1 style={{ marginBottom: 8 }}>Know Thyself</h1>
-            <p style={{ color: '#666', marginBottom: 24 }}>Phase 1 - Skeleton Test</p>
+        <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100vh',
+            maxWidth: 800,
+            margin: '0 auto',
+            padding: '16px 24px',
+        }}>
+            <header style={{ marginBottom: 16 }}>
+                <h1 style={{ marginBottom: 4, fontSize: 24 }}>Know Thyself</h1>
+                <p style={{ color: '#666', margin: 0, fontSize: 14 }}>AI-guided self-reflection</p>
+            </header>
 
             {/* Status Display */}
             <div style={{
-                marginBottom: 24,
-                padding: 16,
+                marginBottom: 16,
+                padding: 12,
                 background: '#fff',
                 borderRadius: 8,
-                border: '1px solid #e0e0e0'
+                border: '1px solid #e0e0e0',
+                fontSize: 14,
             }}>
-                <strong>System Status:</strong>
-                <ul style={{ margin: '8px 0 0 0', paddingLeft: 20 }}>
-                    <li>Database: {status?.databaseReady ? '✅ Ready' : '⏳ Initializing...'}</li>
-                    <li>Claude API: {status?.claudeReady ? '✅ Ready' : '❌ Not configured'}</li>
-                    <li>Embeddings: {status?.embeddingsReady ? '✅ Ready' : '⏳ Loading model...'}</li>
-                </ul>
+                <strong>Status:</strong>{' '}
+                <span style={{ marginLeft: 8 }}>
+                    {status?.databaseReady ? '✅ DB' : '⏳ DB'}{' '}
+                    {status?.claudeReady ? '✅ Claude' : '❌ Claude'}{' '}
+                    {status?.embeddingsReady ? '✅ Embeddings' : '⏳ Embeddings'}
+                </span>
             </div>
 
             {/* Error Display */}
@@ -101,18 +156,89 @@ export default function App() {
                     borderRadius: 4,
                     color: '#c62828',
                     whiteSpace: 'pre-wrap',
+                    fontSize: 14,
                 }}>
                     {error}
                 </div>
             )}
 
+            {/* Messages */}
+            <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                marginBottom: 16,
+                padding: 16,
+                background: '#fafafa',
+                borderRadius: 8,
+                border: '1px solid #e0e0e0',
+            }}>
+                {messages.length === 0 && !streamingResponse && (
+                    <p style={{ color: '#999', textAlign: 'center', marginTop: 40 }}>
+                        Start a conversation to begin your self-reflection journey.
+                    </p>
+                )}
+
+                {messages.map((msg) => (
+                    <div
+                        key={msg.id}
+                        style={{
+                            marginBottom: 16,
+                            padding: 12,
+                            background: msg.role === 'user' ? '#e3f2fd' : '#fff',
+                            borderRadius: 8,
+                            border: '1px solid #e0e0e0',
+                        }}
+                    >
+                        <div style={{
+                            fontSize: 12,
+                            color: '#666',
+                            marginBottom: 4,
+                            fontWeight: 500,
+                        }}>
+                            {msg.role === 'user' ? 'You' : 'Assistant'}
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                            {msg.content}
+                        </div>
+                    </div>
+                ))}
+
+                {/* Streaming response */}
+                {streamingResponse && (
+                    <div
+                        style={{
+                            marginBottom: 16,
+                            padding: 12,
+                            background: '#fff',
+                            borderRadius: 8,
+                            border: '1px solid #e0e0e0',
+                        }}
+                    >
+                        <div style={{
+                            fontSize: 12,
+                            color: '#666',
+                            marginBottom: 4,
+                            fontWeight: 500,
+                        }}>
+                            Assistant
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                            {streamingResponse}
+                            <span style={{ opacity: 0.5 }}>▊</span>
+                        </div>
+                    </div>
+                )}
+
+                <div ref={messagesEndRef} />
+            </div>
+
             {/* Input */}
-            <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
                 <input
                     ref={inputRef}
                     type="text"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="Type a message..."
                     disabled={isLoading || !status?.claudeReady}
@@ -127,7 +253,7 @@ export default function App() {
                 />
                 <button
                     onClick={handleSend}
-                    disabled={isLoading || !message.trim() || !status?.claudeReady}
+                    disabled={isLoading || !input.trim() || !status?.claudeReady}
                     style={{
                         padding: '12px 24px',
                         fontSize: 16,
@@ -141,19 +267,6 @@ export default function App() {
                     {isLoading ? 'Sending...' : 'Send'}
                 </button>
             </div>
-
-            {/* Response */}
-            {response && (
-                <div style={{
-                    padding: 16,
-                    background: '#f5f5f5',
-                    borderRadius: 8,
-                    whiteSpace: 'pre-wrap',
-                    lineHeight: 1.6,
-                }}>
-                    {response}
-                </div>
-            )}
         </div>
     );
 }

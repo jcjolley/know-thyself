@@ -10,6 +10,9 @@ interface ElectronAPI {
         onError: (callback: (error: string) => void) => void;
         removeAllListeners: () => void;
     };
+    messages: {
+        history: () => Promise<unknown[]>;
+    };
     profile: {
         get: () => Promise<unknown>;
     };
@@ -19,6 +22,12 @@ interface ElectronAPI {
     };
     app: {
         getStatus: () => Promise<unknown>;
+    };
+    debug: {
+        getExtractions: (messageId?: string) => Promise<unknown[]>;
+        waitForExtraction: (messageId: string, timeoutMs?: number) => Promise<unknown | null>;
+        clearDatabase: () => Promise<void>;
+        getMessages: () => Promise<unknown[]>;
     };
 }
 
@@ -41,6 +50,9 @@ const api: ElectronAPI = {
             ipcRenderer.removeAllListeners('chat:error');
         },
     },
+    messages: {
+        history: () => ipcRenderer.invoke('messages:history'),
+    },
     profile: {
         get: () => ipcRenderer.invoke('profile:get'),
     },
@@ -50,6 +62,12 @@ const api: ElectronAPI = {
     },
     app: {
         getStatus: () => ipcRenderer.invoke('app:status'),
+    },
+    debug: {
+        getExtractions: (messageId?: string) => ipcRenderer.invoke('debug:getExtractions', messageId),
+        waitForExtraction: (messageId: string, timeoutMs?: number) => ipcRenderer.invoke('debug:waitForExtraction', messageId, timeoutMs),
+        clearDatabase: () => ipcRenderer.invoke('debug:clearDatabase'),
+        getMessages: () => ipcRenderer.invoke('debug:getMessages'),
     },
 };
 

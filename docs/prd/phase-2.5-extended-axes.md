@@ -181,6 +181,75 @@ The extraction infrastructure should capture all signals from the start. Low-con
 - [ ] Given user tends to suppress emotions, when extraction runs, then emotional_regulation is "suppression"
 - [ ] Given user expresses "I can figure this out", when extraction runs, then self_efficacy is "high"
 
+### US-214: Developer Profile Debug Page
+**As a** developer
+**I want** a debug page that displays all extracted user profile data
+**So that** I can verify extractions are working correctly and understand what the system has learned
+
+**Acceptance Criteria:**
+- [ ] Given I navigate to the debug page, when the page loads, then I see a summary of all psychological signals grouped by tier
+- [ ] Given psychological signals exist, when I view the debug page, then each signal shows: dimension, value, confidence score, evidence count, and last updated timestamp
+- [ ] Given values have been extracted, when I view the debug page, then I see all user values with their confidence, description, and supporting quotes
+- [ ] Given challenges have been extracted, when I view the debug page, then I see all active challenges with mention counts and status
+- [ ] Given goals have been extracted, when I view the debug page, then I see all goals with their status (stated/in_progress/achieved/abandoned) and timeframes
+- [ ] Given maslow signals have been extracted, when I view the debug page, then I see recent signals grouped by level with their descriptions
+- [ ] Given evidence exists for any extraction, when I click on an item, then I see the supporting quotes and source message IDs
+- [ ] Given the page is loaded, when I click a "Refresh" button, then the data reloads without full page reload
+- [ ] Given the page is loaded, when I look at the header, then I see total counts: # of signals, # of values, # of challenges, # of goals
+- [ ] Given the profile has confidence scores, when I view the page, then items below MIN_CONFIDENCE (0.5) are visually distinguished (e.g., grayed out)
+
+**UI Structure:**
+```
+Debug: User Profile
+================================
+Signals: 12 | Values: 5 | Challenges: 3 | Goals: 2
+[Refresh]
+
+## Life Situation
+- work_status: employed (0.75) - 3 evidence
+- relationship_status: married (0.85) - 2 evidence
+...
+
+## Psychological Signals (by tier)
+### Tier 1
+- support_seeking_style: emotional_support (0.60)
+### Tier 3
+- big_five.extraversion: low (0.55)
+- risk_tolerance: averse (0.40) [below threshold]
+...
+
+## Values
+- family: "Prioritizes family relationships" (0.80)
+  └ "my wife and kids are everything to me"
+...
+
+## Challenges
+- Work-life balance (active) - mentioned 4 times
+...
+
+## Goals
+- Learn guitar (stated) - short_term
+...
+
+## Recent Maslow Signals
+- safety/concern: job security worries
+...
+```
+
+**Files to Create:**
+| File | Purpose |
+|------|---------|
+| `src/renderer/DebugProfile.tsx` | Debug page component |
+| `src/renderer/components/SignalCard.tsx` | Reusable signal display component |
+
+**Files to Modify:**
+| File | Changes |
+|------|---------|
+| `src/main/ipc.ts` | Add `debug:getFullProfile` handler |
+| `src/preload/index.ts` | Expose `debug.getFullProfile` |
+| `src/shared/types.ts` | Add `FullProfileData` interface |
+| `src/renderer/App.tsx` | Add route/toggle to access debug page |
+
 ---
 
 ## Phases
@@ -1637,17 +1706,22 @@ export function buildStyleGuidance(supportStyle: string | null, intent: string |
 | File | Purpose |
 |------|---------|
 | `src/main/db/profile.ts` | Extended profile persistence functions |
+| `src/renderer/DebugProfile.tsx` | Debug page component for US-214 |
+| `src/renderer/components/SignalCard.tsx` | Reusable signal display component for US-214 |
 | `tests/integration/extended-axes.spec.ts` | Phase 2.5 integration tests |
+| `tests/debug-profile.spec.ts` | Debug page tests for US-214 |
 
 ### Files to Modify
 | File | Changes |
 |------|---------|
-| `src/shared/types.ts` | Add extended extraction types, Goal, PsychologicalSignal |
+| `src/shared/types.ts` | Add extended extraction types, Goal, PsychologicalSignal, FullProfileData |
 | `src/main/prompts/extraction.ts` | Expand prompt for all Tier 1-2 axes |
 | `src/main/extraction.ts` | Call new profile update functions |
 | `src/main/context.ts` | Include life situation, goals, moral foundations, intent |
 | `src/main/prompts/response.ts` | Add style guidance based on support style and intent |
-| `src/main/ipc.ts` | Pass conversationId to extraction |
+| `src/main/ipc.ts` | Pass conversationId to extraction, add `debug:getFullProfile` handler |
+| `src/preload/index.ts` | Expose `debug.getFullProfile` |
+| `src/renderer/App.tsx` | Add route/toggle to access debug page |
 
 ---
 
@@ -1717,6 +1791,17 @@ The `psychological_signals` table's flexible `dimension`/`value` structure accom
 22. [ ] Signal with confidence < 0.5 does NOT appear in context summary
 23. [ ] Check response with support_style="emotional_support" → Response leads with validation
 
+### Developer Debug Page (US-214)
+24. [ ] Navigate to debug page → Page loads with profile data grouped by section
+25. [ ] View psychological signals → Each shows dimension, value, confidence, evidence count
+26. [ ] View values section → Shows all extracted values with quotes
+27. [ ] View challenges section → Shows active challenges with mention counts
+28. [ ] View goals section → Shows all goals with status and timeframe
+29. [ ] Click Refresh button → Data reloads without page reload
+30. [ ] View low-confidence items → Items below 0.5 are visually distinguished (grayed)
+31. [ ] View header counts → Shows totals for signals, values, challenges, goals
+32. [ ] Empty profile → Page displays gracefully with "No data yet" messages
+
 ---
 
 ## Implementation Order
@@ -1728,8 +1813,13 @@ The `psychological_signals` table's flexible `dimension`/`value` structure accom
 5. Update `src/main/context.ts` to include extended profile data
 6. Update `src/main/prompts/response.ts` with style guidance
 7. Update `src/main/ipc.ts` to pass conversationId through extraction chain
-8. Write tests
-9. Run verification checklist
+8. Build developer debug page (US-214):
+   a. Add `debug:getFullProfile` IPC handler
+   b. Expose in preload
+   c. Create `DebugProfile.tsx` component
+   d. Add navigation toggle to `App.tsx`
+9. Write tests
+10. Run verification checklist
 
 ---
 

@@ -51,6 +51,60 @@ export interface Challenge {
 
 export type MaslowLevel = 'physiological' | 'safety' | 'belonging' | 'esteem' | 'self_actualization';
 
+// =============================================================================
+// Extraction Types
+// =============================================================================
+
+export interface ExtractionResult {
+    raw_quotes: string[];
+    values: ExtractedValue[];
+    challenges: ExtractedChallenge[];
+    goals: ExtractedGoal[];
+    maslow_signals: ExtractedMaslowSignal[];
+    emotional_tone: string;
+    support_seeking_style?: 'problem_solving' | 'emotional_support' | 'information' | 'unclear';
+}
+
+export interface ExtractedValue {
+    name: string;
+    description: string;
+    value_type: 'stated' | 'revealed';
+    confidence: number;
+    quote: string;
+}
+
+export interface ExtractedChallenge {
+    description: string;
+    severity: 'minor' | 'moderate' | 'major';
+    quote: string;
+}
+
+export interface ExtractedGoal {
+    description: string;
+    timeframe?: 'short_term' | 'medium_term' | 'long_term';
+    quote: string;
+}
+
+export interface ExtractedMaslowSignal {
+    level: MaslowLevel;
+    signal_type: 'concern' | 'stable';
+    description: string;
+    quote: string;
+}
+
+export interface Extraction {
+    id: string;
+    message_id: string;
+    extraction_json: string;
+    status: 'raw' | 'validated' | 'rejected';
+    validation_errors: string | null;
+    created_at: string;
+}
+
+// =============================================================================
+// Database Entity Types (continued)
+// =============================================================================
+
 export interface MaslowSignal {
     id: string;
     level: MaslowLevel;
@@ -110,6 +164,9 @@ export interface ElectronAPI {
         onError: (callback: (error: string) => void) => void;
         removeAllListeners: () => void;
     };
+    messages: {
+        history: () => Promise<Message[]>;
+    };
     profile: {
         get: () => Promise<ProfileSummary>;
     };
@@ -119,6 +176,12 @@ export interface ElectronAPI {
     };
     app: {
         getStatus: () => Promise<AppStatus>;
+    };
+    debug: {
+        getExtractions: (messageId?: string) => Promise<Extraction[]>;
+        waitForExtraction: (messageId: string, timeoutMs?: number) => Promise<Extraction | null>;
+        clearDatabase: () => Promise<void>;
+        getMessages: () => Promise<Message[]>;
     };
 }
 

@@ -1,9 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { launchApp, closeApp, getPage } from './helpers/electron';
+import { waitForClaude } from './helpers/db-utils';
 
 test.describe('US-005: Claude API Integration', () => {
     test.beforeAll(async () => {
         await launchApp();
+        // Wait for Claude to be ready before running tests
+        const page = getPage();
+        await waitForClaude(page, 10000);
     });
 
     test.afterAll(async () => {
@@ -16,10 +20,17 @@ test.describe('US-005: Claude API Integration', () => {
         await expect(input.first()).toBeVisible();
     });
 
-    test('send button exists and is clickable', async () => {
+    test('send button exists and is enabled when input has text', async () => {
         const page = getPage();
         const button = await page.locator('button:has-text("Send")');
         await expect(button).toBeVisible();
+
+        // Button is disabled without input text (expected behavior)
+        await expect(button).toBeDisabled();
+
+        // Type something and button should be enabled
+        const input = await page.locator('input[type="text"]').first();
+        await input.fill('test message');
         await expect(button).toBeEnabled();
     });
 
