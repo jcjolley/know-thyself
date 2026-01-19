@@ -1,85 +1,36 @@
-# Know Thyself - Development Guidelines
+# Know Thyself
 
-## Start Here
+AI-guided self-reflection desktop app. Users converse with Claude; system extracts psychological insights (values, challenges, Maslow signals) for pattern recognition.
 
-**Read [`ARCHITECTURE.md`](./ARCHITECTURE.md) first** for a comprehensive overview of the codebase including:
-- Tech stack and key files
-- IPC channel reference
-- How to add new features
-- Troubleshooting common issues
-- Mermaid diagrams (C4, data flow, ER, sequence)
+## Quick Start
 
-This file (`CLAUDE.md`) contains rules and constraints. `ARCHITECTURE.md` contains technical reference.
-
----
+- **Architecture**: Read [`ARCHITECTURE.md`](./ARCHITECTURE.md) for tech overview, file reference, IPC channels, diagrams
+- **Commands**: Run `make help` for all commands. Key: `make dev`, `make test`, `make check`
+- **Testing**: See [`.claude/rules/testing.md`](./.claude/rules/testing.md) for test requirements
+- **PRD Format**: See [`.claude/rules/prd.md`](./.claude/rules/prd.md) for writing specifications
 
 ## CRITICAL: API Key Security
 
-**NEVER share, commit, log, or expose the `ANTHROPIC_API_KEY` under any circumstances.**
+**NEVER expose `ANTHROPIC_API_KEY`** in code, logs, commits, output, or chat.
 
-- The `.env` file containing the API key is in `.gitignore` and must NEVER be committed
-- NEVER include the API key in code, comments, logs, error messages, or any output
-- NEVER share the API key in chat, documentation, or any communication
-- If asked to show environment variables or debug configuration, ALWAYS redact the API key
-- Treat the API key as a secret equivalent to a password
-
-## Development Commands
-
-**All development commands must have a simple `make` target.** Use `make <target>` for all common operations:
-
-| Command | Purpose |
-|---------|---------|
-| `make install` | Install dependencies |
-| `make dev` | Start development servers |
-| `make build` | Build for production |
-| `make typecheck` | Run TypeScript type checking |
-| `make lint` | Run ESLint |
-| `make test` | Run all Playwright tests |
-| `make test-ui` | Run tests with Playwright UI |
-| `make test-coverage` | Run tests with coverage report |
-| `make check` | Run all quality gates (typecheck, lint, test) |
-| `make clean` | Remove build artifacts |
-| `make help` | Show all available commands |
-
-Do not use `npm run <script>` directly - always use the corresponding `make` target.
-
-## Testing Requirements
-
-**Every feature must have corresponding Playwright tests.**
-
-| Requirement | Threshold |
-|-------------|-----------|
-| Code Coverage | >= 80% |
-| All Tests Pass | Required |
-| Test per User Story | Required |
-
-### Test Structure
-- `tests/helpers/` - Shared test utilities (Electron launcher, etc.)
-- `tests/*.spec.ts` - Test files, one per user story
-
-### Writing Tests
-1. Each user story (US-XXX) must have a corresponding `tests/<feature>.spec.ts` file
-2. Use the shared `launchApp()` and `closeApp()` helpers from `tests/helpers/electron.ts`
-3. Tests run sequentially (Electron constraint - single worker)
-4. Run `make test` before committing any changes
-5. Run `make test-coverage` to verify 80%+ coverage
-
-## Project Structure
-
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for detailed file locations, key files table, and modification guidance.
-
-```
-src/main/       → Electron main process (Node.js, ESM)
-src/preload/    → Context bridge (CommonJS)
-src/renderer/   → React UI (Vite)
-src/shared/     → Shared TypeScript types
-tests/          → Playwright test files
-```
+- `.env` is gitignored and must NEVER be committed
+- If asked to show env vars or debug config, ALWAYS redact the API key
+- Treat as equivalent to a password
 
 ## Key Constraints
 
-1. **ESM Modules**: Project uses `"type": "module"` - all imports need `.js` extension in main process
-2. **Relative Imports in Main**: Use relative paths (not path aliases) in main process files
-3. **Separate tsconfigs**: `tsconfig.main.json` for main process, `tsconfig.preload.json` for preload
-4. **Environment Variables**: Loaded via `dotenv` at the top of `src/main/index.ts`
-5. **Tests Required**: Every feature must have Playwright tests with 80%+ coverage
+1. **ESM in main process** → use `.js` extensions in imports
+2. **Relative imports only** in `src/main/` (no `@/` path aliases)
+3. **CommonJS in preload** → separate tsconfig, different module system
+4. **Tests required** → every feature needs Playwright tests (80%+ coverage)
+5. **Use make targets** → not `npm run` directly
+
+## Domain Terms
+
+| Term | Meaning |
+|------|---------|
+| **Maslow signals** | User needs mapped to hierarchy (physiological → safety → belonging → esteem → self-actualization) |
+| **Extractions** | AI-parsed insights from conversation: values, challenges, patterns |
+| **Evidence** | Quotes from messages that support/link to extracted insights |
+| **Confidence** | 0.0-1.0 score indicating certainty of an extraction |
+| **Profile summary** | Computed psychological profile from accumulated signals |
