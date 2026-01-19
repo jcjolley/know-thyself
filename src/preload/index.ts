@@ -29,6 +29,10 @@ interface ElectronAPI {
         clearDatabase: () => Promise<void>;
         getMessages: () => Promise<unknown[]>;
     };
+    admin?: {
+        getProfile: () => Promise<unknown>;
+        getEvidence: (dimension: string) => Promise<unknown[]>;
+    };
 }
 
 const api: ElectronAPI = {
@@ -68,6 +72,10 @@ const api: ElectronAPI = {
         waitForExtraction: (messageId: string, timeoutMs?: number) => ipcRenderer.invoke('debug:waitForExtraction', messageId, timeoutMs),
         clearDatabase: () => ipcRenderer.invoke('debug:clearDatabase'),
         getMessages: () => ipcRenderer.invoke('debug:getMessages'),
+    },
+    admin: {
+        getProfile: () => ipcRenderer.invoke('admin:getProfile'),
+        getEvidence: (dimension: string) => ipcRenderer.invoke('admin:getEvidence', dimension),
     },
 };
 

@@ -15,6 +15,8 @@ import type {
     ExtractedTier4Signals,
     Goal,
     SupportSeekingStyle,
+    AdminSignal,
+    SignalEvidence,
 } from '../../shared/types.js';
 
 // =============================================================================
@@ -421,4 +423,34 @@ export function getCompleteProfile(): CompleteProfile {
         emotionalRegulation: getSingleSignal('emotional_regulation'),
         selfEfficacy: getSingleSignal('self_efficacy'),
     };
+}
+
+// =============================================================================
+// Admin Page Queries
+// =============================================================================
+
+export function getAllSignalsForAdmin(): AdminSignal[] {
+    const db = getDb();
+    return db.prepare(`
+        SELECT id, dimension, value, confidence, evidence_count, last_updated
+        FROM psychological_signals
+        ORDER BY last_updated DESC
+    `).all() as AdminSignal[];
+}
+
+export function getEvidenceForDimension(dimension: string): SignalEvidence[] {
+    const db = getDb();
+    return db.prepare(`
+        SELECT e.id, e.quote, e.message_id, e.created_at
+        FROM evidence e
+        WHERE e.target_id = ?
+        ORDER BY e.created_at DESC
+    `).all(dimension) as SignalEvidence[];
+}
+
+export function getAllGoals(): Goal[] {
+    const db = getDb();
+    return db.prepare(`
+        SELECT * FROM goals ORDER BY last_mentioned DESC
+    `).all() as Goal[];
 }

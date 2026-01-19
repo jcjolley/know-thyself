@@ -5,7 +5,8 @@ import { getDb } from './db/sqlite.js';
 import { getOrCreateConversation, saveMessage, getRecentMessages } from './db/messages.js';
 import { runExtraction } from './extraction.js';
 import { assembleContext } from './context.js';
-import type { ProfileSummary, MaslowSignal, Value, Challenge, AppStatus, Message, Extraction } from '../shared/types.js';
+import { getAllSignalsForAdmin, getEvidenceForDimension, getAllGoals } from './db/profile.js';
+import type { ProfileSummary, MaslowSignal, Value, Challenge, AppStatus, Message, Extraction, AdminProfileData, SignalEvidence } from '../shared/types.js';
 
 let initError: string | null = null;
 
@@ -153,10 +154,10 @@ export function registerIPCHandlers(): void {
     });
 
     // ==========================================================================
-    // Debug Handlers (test mode only)
+    // Debug Handlers (test/development mode only)
     // ==========================================================================
 
-    if (process.env.NODE_ENV === 'test') {
+    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
         ipcMain.handle('debug:getExtractions', async (_event, messageId?: string): Promise<Extraction[]> => {
             const db = getDb();
             if (messageId) {
@@ -187,12 +188,30 @@ export function registerIPCHandlers(): void {
                 DELETE FROM user_values;
                 DELETE FROM messages;
                 DELETE FROM conversations;
+                DELETE FROM psychological_signals;
+                DELETE FROM goals;
             `);
         });
 
         ipcMain.handle('debug:getMessages', async (): Promise<Message[]> => {
             const db = getDb();
             return db.prepare(`SELECT * FROM messages ORDER BY created_at`).all() as Message[];
+        });
+
+        // Admin Page Handlers
+        ipcMain.handle('admin:getProfile', async (): Promise<AdminProfileData> => {
+            const db = getDb();
+            const signals = getAllSignalsForAdmin();
+            const values = db.prepare(`SELECT * FROM user_values ORDER BY confidence DESC`).all() as Value[];
+            const challenges = db.prepare(`SELECT * FROM challenges ORDER BY mention_count DESC`).all() as Challenge[];
+            const goals = getAllGoals();
+            const maslowSignals = db.prepare(`SELECT * FROM maslow_signals ORDER BY created_at DESC`).all() as MaslowSignal[];
+
+            return { signals, values, challenges, goals, maslowSignals };
+        });
+
+        ipcMain.handle('admin:getEvidence', async (_event, dimension: string): Promise<SignalEvidence[]> => {
+            return getEvidenceForDimension(dimension);
         });
     }
 }

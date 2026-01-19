@@ -192,6 +192,10 @@ export interface ElectronAPI {
         clearDatabase: () => Promise<void>;
         getMessages: () => Promise<Message[]>;
     };
+    admin?: {
+        getProfile: () => Promise<AdminProfileData>;
+        getEvidence: (dimension: string) => Promise<SignalEvidence[]>;
+    };
 }
 
 // =============================================================================
@@ -395,6 +399,34 @@ export interface PsychologicalSignal {
     confidence: number;
     evidence_count: number;
     last_updated: string;
+}
+
+// =============================================================================
+// Admin Page Types
+// =============================================================================
+
+export interface AdminSignal {
+    id: string;
+    dimension: string;
+    value: string;
+    confidence: number;
+    evidence_count: number;
+    last_updated: string;
+}
+
+export interface SignalEvidence {
+    id: string;
+    quote: string;
+    message_id: string;
+    created_at: string;
+}
+
+export interface AdminProfileData {
+    signals: AdminSignal[];
+    values: Value[];
+    challenges: Challenge[];
+    goals: Goal[];
+    maslowSignals: MaslowSignal[];
 }
 
 declare global {

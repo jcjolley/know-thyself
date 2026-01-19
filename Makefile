@@ -60,7 +60,7 @@ rebuild:
 	npm run postinstall
 
 # Run all quality gates
-check: typecheck lint test
+check: typecheck lint build test
 	@echo "All quality gates passed!"
 
 # Show available commands
