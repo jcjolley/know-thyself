@@ -117,6 +117,13 @@ interface FeatureModel {
 - `npm run test` - All tests pass
 - `npm run build` - Build succeeds
 
+### Post-Verification: Code Simplification
+After all quality gates pass, run the code simplifier and re-verify:
+
+1. Run `/code-simplifier:code-simplifier` on modified files
+2. Re-run all quality gates above
+3. Repeat until no further simplifications are made
+
 ---
 
 ## Verification Checklist

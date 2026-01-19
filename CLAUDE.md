@@ -46,3 +46,11 @@ See [`AXIS_REFERENCE_LIBRARY.md`](./AXIS_REFERENCE_LIBRARY.md) for full definiti
 | **2 - Early Inference** | Core Values (Schwartz), Challenges, Goals, Moral Foundations (Haidt) | Improve personalization |
 | **3 - Personality** | Big Five (OCEAN), Risk Tolerance, Motivation Style | Frame advice delivery |
 | **4 - Deeper Patterns** | Attachment Style, Locus of Control, Temporal Orientation, Growth Mindset, + more | Emerge over time |
+
+## Post-Verification: Code Simplification
+
+After completing verification for any feature or phase:
+
+1. **Run verification** → `make check`
+2. **Run code simplifier** → `/code-simplifier:code-simplifier`
+3. **Re-verify** → `make check`

@@ -193,7 +193,8 @@ Reference template: `docs/prd/TEMPLATE.md`
 1. **Before implementing**: Read full PRD, ask clarifying questions
 2. **During implementation**: Follow phases sequentially, mark completed items
 3. **After each phase**: Verify against acceptance criteria and quality gates
-4. **On completion**: Run full verification checklist
+4. **Post-verification**: Run `/code-simplifier:code-simplifier`, then re-verify
+5. **On completion**: Run full verification checklist
 
 ---
 
