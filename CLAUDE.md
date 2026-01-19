@@ -1,5 +1,18 @@
 # Know Thyself - Development Guidelines
 
+## Start Here
+
+**Read [`ARCHITECTURE.md`](./ARCHITECTURE.md) first** for a comprehensive overview of the codebase including:
+- Tech stack and key files
+- IPC channel reference
+- How to add new features
+- Troubleshooting common issues
+- Mermaid diagrams (C4, data flow, ER, sequence)
+
+This file (`CLAUDE.md`) contains rules and constraints. `ARCHITECTURE.md` contains technical reference.
+
+---
+
 ## CRITICAL: API Key Security
 
 **NEVER share, commit, log, or expose the `ANTHROPIC_API_KEY` under any circumstances.**
@@ -53,11 +66,15 @@ Do not use `npm run <script>` directly - always use the corresponding `make` tar
 
 ## Project Structure
 
-- `src/main/` - Electron main process (Node.js)
-- `src/preload/` - Preload scripts (contextBridge)
-- `src/renderer/` - React UI (Vite)
-- `src/shared/` - Shared TypeScript types
-- `tests/` - Playwright test files
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for detailed file locations, key files table, and modification guidance.
+
+```
+src/main/       → Electron main process (Node.js, ESM)
+src/preload/    → Context bridge (CommonJS)
+src/renderer/   → React UI (Vite)
+src/shared/     → Shared TypeScript types
+tests/          → Playwright test files
+```
 
 ## Key Constraints
 
