@@ -10,7 +10,7 @@ Comprehensive Mermaid diagrams for understanding the Electron application archit
 
 A desktop Electron application for AI-guided self-reflection. Users converse with Claude AI, and the system extracts psychological insights (values, challenges, Maslow signals) storing them in dual databases for pattern recognition.
 
-**Current State**: Phase 1 skeleton complete. Basic chat + status display working. Extraction and profile computation not yet implemented.
+**Current State**: Phase 2.5 complete. Core loop with extraction pipeline, profile persistence for 15+ psychological axes (Tier 1-4), context assembly with confidence thresholds, and intent-aware response styling.
 
 ### Tech Stack
 
@@ -31,13 +31,18 @@ A desktop Electron application for AI-guided self-reflection. Users converse wit
 |------|---------|----------------|
 | `src/main/index.ts` | Electron entry, lifecycle, init orchestration | Adding initialization steps |
 | `src/main/ipc.ts` | IPC handlers (main ↔ renderer) | Adding new API endpoints |
-| `src/main/claude.ts` | Anthropic SDK wrapper | Changing AI behavior/model |
+| `src/main/claude.ts` | Anthropic SDK wrapper with style guidance | Changing AI behavior/model |
 | `src/main/embeddings.ts` | ONNX model loading + inference | Changing embedding model |
+| `src/main/extraction.ts` | Extraction pipeline + profile application | Changing extraction logic |
+| `src/main/context.ts` | Context assembly with profile data | Changing what context is included |
 | `src/main/db/sqlite.ts` | SQLite schema + queries | Adding tables/queries |
 | `src/main/db/lancedb.ts` | Vector store operations | Adding vector collections |
+| `src/main/db/profile.ts` | Extended profile persistence (all 15+ axes) | Adding psychological signal persistence |
+| `src/main/prompts/extraction.ts` | LLM prompt for psychological extraction | Changing what signals are extracted |
+| `src/main/prompts/response.ts` | Response prompt + style guidance | Changing response behavior |
 | `src/preload/index.ts` | Context bridge (exposes `window.api`) | Exposing new IPC to renderer |
 | `src/renderer/App.tsx` | Main React component | UI changes |
-| `src/shared/types.ts` | TypeScript interfaces | Adding/changing data types |
+| `src/shared/types.ts` | TypeScript interfaces (incl. all extraction types) | Adding/changing data types |
 
 ### Development Commands
 
@@ -102,6 +107,19 @@ make check        # All quality gates
 | `NODE_ENV` | Auto | development/test/production |
 
 **Security**: API key loaded via dotenv in `src/main/index.ts`. Never log or expose.
+
+### Psychological Axes (Phase 2.5)
+
+The extraction pipeline captures 15+ psychological dimensions across 4 tiers:
+
+| Tier | Axes | Confidence Threshold |
+|------|------|---------------------|
+| **1 - Essential** | Life Situation, Immediate Intent, Support-Seeking Style | 0.5 |
+| **2 - Early** | Values, Challenges, Goals, Moral Foundations | 0.5 |
+| **3 - Personality** | Big Five (OCEAN), Risk Tolerance, Motivation Style | 0.5 |
+| **4 - Deeper** | Attachment, Locus of Control, Temporal Orientation, Growth Mindset, Change Readiness, Stress Response, Emotional Regulation, Self-Efficacy | 0.5 |
+
+Signals below MIN_CONFIDENCE (0.5) are stored but excluded from context until they mature through repeated evidence.
 
 ### Data Locations (Runtime)
 
@@ -212,10 +230,14 @@ C4Component
     Container_Boundary(main, "Main Process") {
         Component(entry, "App Entry", "index.ts", "Electron lifecycle, window creation, initialization orchestration")
         Component(ipc, "IPC Handlers", "ipc.ts", "Routes renderer requests to appropriate services")
-        Component(claude, "Claude Client", "claude.ts", "Anthropic SDK wrapper for chat and streaming")
+        Component(claude, "Claude Client", "claude.ts", "Anthropic SDK wrapper with style guidance")
         Component(embed, "Embeddings Service", "embeddings.ts", "ONNX model loading and inference")
+        Component(extraction, "Extraction Service", "extraction.ts", "Runs LLM extraction, validates, applies to profile")
+        Component(context, "Context Assembly", "context.ts", "Builds profile summary with confidence filtering")
         Component(sqliteService, "SQLite Service", "db/sqlite.ts", "Schema management and queries")
+        Component(profileService, "Profile Service", "db/profile.ts", "Psychological signal persistence (15+ axes)")
         Component(lanceService, "LanceDB Service", "db/lancedb.ts", "Vector storage and similarity search")
+        Component(prompts, "Prompts", "prompts/*.ts", "Extraction and response prompt templates")
     }
 
     ContainerDb(sqliteDb, "SQLite", "know-thyself.db")
@@ -231,11 +253,18 @@ C4Component
 
     Rel(ipc, claude, "chat:send, chat:stream")
     Rel(ipc, embed, "embeddings:embed")
-    Rel(ipc, sqliteService, "profile:get")
-    Rel(ipc, lanceService, "Vector operations")
+    Rel(ipc, extraction, "Triggers extraction")
+    Rel(ipc, context, "Assembles context")
 
     Rel(claude, anthropic, "HTTPS")
+    Rel(claude, prompts, "Uses response prompt")
     Rel(embed, onnxModel, "Inference")
+    Rel(extraction, anthropic, "Extraction LLM call")
+    Rel(extraction, prompts, "Uses extraction prompt")
+    Rel(extraction, profileService, "Applies signals")
+    Rel(context, profileService, "Reads profile")
+    Rel(context, lanceService, "Semantic search")
+    Rel(profileService, sqliteDb, "SQL")
     Rel(sqliteService, sqliteDb, "SQL")
     Rel(lanceService, lanceDb, "Vector I/O")
 ```
@@ -266,8 +295,12 @@ flowchart TB
         mainIpc["main/ipc.ts"]
         mainClaude["main/claude.ts"]
         mainEmbed["main/embeddings.ts"]
+        mainExtraction["main/extraction.ts"]
+        mainContext["main/context.ts"]
         mainSqlite["main/db/sqlite.ts"]
+        mainProfile["main/db/profile.ts"]
         mainLance["main/db/lancedb.ts"]
+        mainPrompts["main/prompts/*.ts"]
     end
 
     subgraph PreloadLayer["Preload Layer"]
@@ -293,15 +326,32 @@ flowchart TB
 
     mainIpc --> mainClaude
     mainIpc --> mainEmbed
+    mainIpc --> mainExtraction
+    mainIpc --> mainContext
     mainIpc --> mainSqlite
     mainIpc --> mainLance
     mainIpc --> sharedTypes
 
     mainClaude --> anthropic
+    mainClaude --> mainPrompts
     mainClaude --> sharedTypes
 
     mainEmbed --> onnx
     mainEmbed --> tokenizers
+
+    mainExtraction --> anthropic
+    mainExtraction --> mainPrompts
+    mainExtraction --> mainProfile
+    mainExtraction --> mainSqlite
+    mainExtraction --> sharedTypes
+
+    mainContext --> mainProfile
+    mainContext --> mainLance
+    mainContext --> mainEmbed
+    mainContext --> sharedTypes
+
+    mainProfile --> mainSqlite
+    mainProfile --> sharedTypes
 
     mainSqlite --> betterSqlite
     mainSqlite --> sharedTypes
@@ -586,11 +636,11 @@ erDiagram
 
     psychological_signals {
         integer id PK
-        text dimension
-        text signal_type
-        text description
-        real intensity "0.0 - 1.0"
-        text created_at
+        text dimension UK "life_situation.*, moral.*, big_five.*, etc"
+        text value
+        real confidence "0.0 - 1.0"
+        integer evidence_count
+        text last_updated
     }
 
     activities {
@@ -606,10 +656,10 @@ erDiagram
     goals {
         integer id PK
         text description
-        text goal_type "short_term | long_term | life"
-        text status "active | achieved | abandoned"
-        text created_at
-        text updated_at
+        text status "stated | in_progress | achieved | abandoned"
+        text timeframe "short_term | medium_term | long_term"
+        text first_stated
+        text last_mentioned
     }
 
     evidence {
@@ -956,6 +1006,9 @@ These diagrams provide multiple perspectives on the architecture:
 3. **Local Embeddings**: Privacy-preserving on-device inference
 4. **Streaming IPC**: Real-time response display via event pattern
 5. **Non-blocking Init**: App opens before embeddings fully loaded
+6. **Confidence-Gated Context**: Signals below MIN_CONFIDENCE (0.5) are stored but excluded from context until matured
+7. **Flexible Signal Schema**: `psychological_signals` table uses dimension/value pattern for all 15+ axes
+8. **Intent-Aware Responses**: Style guidance adapts based on detected support-seeking style and conversation intent
 
 ---
 
@@ -1054,11 +1107,17 @@ Project Root
 │   ├── main/           # Main process (Node.js)
 │   │   ├── index.ts    # Entry point
 │   │   ├── ipc.ts      # IPC handlers
-│   │   ├── claude.ts   # AI client
+│   │   ├── claude.ts   # AI client with style guidance
 │   │   ├── embeddings.ts # ONNX inference
-│   │   └── db/
-│   │       ├── sqlite.ts  # Relational DB
-│   │       └── lancedb.ts # Vector DB
+│   │   ├── extraction.ts # Extraction pipeline
+│   │   ├── context.ts  # Context assembly
+│   │   ├── db/
+│   │   │   ├── sqlite.ts  # Relational DB
+│   │   │   ├── lancedb.ts # Vector DB
+│   │   │   └── profile.ts # Extended profile persistence
+│   │   └── prompts/
+│   │       ├── extraction.ts # LLM extraction prompt
+│   │       └── response.ts   # Response prompt + style guidance
 │   ├── preload/        # Context bridge
 │   │   └── index.ts
 │   ├── renderer/       # React UI
@@ -1066,7 +1125,7 @@ Project Root
 │   │   ├── main.tsx
 │   │   └── index.html
 │   └── shared/         # Shared types
-│       └── types.ts
+│       └── types.ts    # Includes all extraction types (Tier 1-4)
 ├── tests/              # Playwright tests
 ├── dist/               # Compiled output
 ├── release/            # Packaged app

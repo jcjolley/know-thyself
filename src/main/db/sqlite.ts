@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS goals (
     id TEXT PRIMARY KEY,
     description TEXT NOT NULL,
     status TEXT DEFAULT 'stated' CHECK (status IN ('stated', 'in_progress', 'achieved', 'abandoned')),
+    timeframe TEXT CHECK (timeframe IS NULL OR timeframe IN ('short_term', 'medium_term', 'long_term')),
     first_stated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_mentioned TIMESTAMP
 );
@@ -155,4 +156,7 @@ CREATE INDEX IF NOT EXISTS idx_evidence_target ON evidence(target_type, target_i
 CREATE INDEX IF NOT EXISTS idx_extractions_message ON extractions(message_id);
 CREATE INDEX IF NOT EXISTS idx_values_confidence ON user_values(confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_challenges_status ON challenges(status);
+
+-- Unique index for psychological signals (required for ON CONFLICT handling)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_psych_signals_dimension ON psychological_signals(dimension);
 `;

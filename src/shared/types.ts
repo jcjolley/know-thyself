@@ -55,6 +55,14 @@ export type MaslowLevel = 'physiological' | 'safety' | 'belonging' | 'esteem' | 
 // Extraction Types
 // =============================================================================
 
+export type SupportSeekingStyle =
+    | 'emotional_support'
+    | 'instrumental_support'
+    | 'informational_support'
+    | 'validation_support'
+    | 'independence'
+    | 'unclear';
+
 export interface ExtractionResult {
     raw_quotes: string[];
     values: ExtractedValue[];
@@ -62,7 +70,7 @@ export interface ExtractionResult {
     goals: ExtractedGoal[];
     maslow_signals: ExtractedMaslowSignal[];
     emotional_tone: string;
-    support_seeking_style?: 'problem_solving' | 'emotional_support' | 'information' | 'unclear';
+    support_seeking_style?: SupportSeekingStyle;
 }
 
 export interface ExtractedValue {
@@ -82,6 +90,7 @@ export interface ExtractedChallenge {
 export interface ExtractedGoal {
     description: string;
     timeframe?: 'short_term' | 'medium_term' | 'long_term';
+    status?: 'stated' | 'in_progress' | 'achieved' | 'abandoned';
     quote: string;
 }
 
@@ -183,6 +192,209 @@ export interface ElectronAPI {
         clearDatabase: () => Promise<void>;
         getMessages: () => Promise<Message[]>;
     };
+}
+
+// =============================================================================
+// Extended Extraction Types (Phase 2.5)
+// =============================================================================
+
+export interface ExtractedLifeSituation {
+    work?: {
+        status: 'employed' | 'unemployed' | 'student' | 'retired' | 'self_employed' | 'unknown';
+        description?: string;
+        quote?: string;
+    };
+    relationship?: {
+        status: 'single' | 'dating' | 'partnered' | 'married' | 'divorced' | 'widowed' | 'unknown';
+        quote?: string;
+    };
+    family?: {
+        has_children?: boolean;
+        children_details?: string;
+        parent_relationship?: string;
+        quote?: string;
+    };
+    living?: {
+        situation?: string;
+        location?: string;
+        quote?: string;
+    };
+    health?: {
+        physical_concerns?: string[];
+        mental_health_context?: string;
+        quote?: string;
+    };
+    age_stage?: 'young_adult' | 'adult' | 'midlife' | 'senior' | 'unknown';
+}
+
+export type IntentType =
+    | 'specific_question'
+    | 'general_exploration'
+    | 'emotional_processing'
+    | 'accountability'
+    | 'self_discovery'
+    | 'crisis_support'
+    | 'just_curious'
+    | 'unknown';
+
+export interface ExtractedIntent {
+    type: IntentType;
+    description: string;
+    confidence: number;
+    quote?: string;
+}
+
+export type MoralFoundation =
+    | 'care'
+    | 'fairness'
+    | 'loyalty'
+    | 'authority'
+    | 'sanctity'
+    | 'liberty';
+
+export interface ExtractedMoralSignal {
+    foundation: MoralFoundation;
+    valence: 'positive' | 'negative';
+    strength: 'weak' | 'moderate' | 'strong';
+    quote: string;
+}
+
+// =============================================================================
+// Tier 3: Personality & Disposition
+// =============================================================================
+
+export type BigFiveTrait = 'openness' | 'conscientiousness' | 'extraversion' | 'agreeableness' | 'neuroticism';
+export type TraitLevel = 'low' | 'moderate' | 'high';
+
+export interface ExtractedBigFiveSignal {
+    trait: BigFiveTrait;
+    level: TraitLevel;
+    confidence: number;
+    quote: string;
+}
+
+export type RiskTolerance = 'seeking' | 'neutral' | 'averse';
+
+export interface ExtractedRiskSignal {
+    tolerance: RiskTolerance;
+    confidence: number;
+    quote: string;
+}
+
+export type MotivationStyle = 'approach' | 'avoidance' | 'mixed';
+
+export interface ExtractedMotivationSignal {
+    style: MotivationStyle;
+    confidence: number;
+    quote: string;
+}
+
+// =============================================================================
+// Tier 4: Deeper Patterns
+// =============================================================================
+
+export type AttachmentStyle = 'secure' | 'anxious' | 'avoidant' | 'disorganized';
+
+export interface ExtractedAttachmentSignal {
+    style: AttachmentStyle;
+    confidence: number;
+    quote: string;
+}
+
+export type LocusOfControl = 'internal' | 'external' | 'mixed';
+
+export interface ExtractedLocusSignal {
+    locus: LocusOfControl;
+    confidence: number;
+    quote: string;
+}
+
+export type TemporalOrientation =
+    | 'past_negative'
+    | 'past_positive'
+    | 'present_hedonistic'
+    | 'present_fatalistic'
+    | 'future';
+
+export interface ExtractedTemporalSignal {
+    orientation: TemporalOrientation;
+    confidence: number;
+    quote: string;
+}
+
+export type GrowthMindset = 'fixed' | 'growth' | 'mixed';
+
+export interface ExtractedMindsetSignal {
+    mindset: GrowthMindset;
+    confidence: number;
+    quote: string;
+}
+
+export type ChangeReadiness =
+    | 'precontemplation'
+    | 'contemplation'
+    | 'preparation'
+    | 'action'
+    | 'maintenance';
+
+export type StressResponse = 'fight' | 'flight' | 'freeze' | 'fawn';
+
+export type EmotionalRegulation = 'suppression' | 'expression' | 'reappraisal' | 'rumination';
+
+export type SelfEfficacy = 'low' | 'moderate' | 'high';
+
+export interface ExtractedTier4Signals {
+    change_readiness?: { stage: ChangeReadiness; confidence: number; quote?: string };
+    stress_response?: { response: StressResponse; confidence: number; quote?: string };
+    emotional_regulation?: { style: EmotionalRegulation; confidence: number; quote?: string };
+    self_efficacy?: { level: SelfEfficacy; confidence: number; quote?: string };
+}
+
+// =============================================================================
+// Complete Extraction Result
+// =============================================================================
+
+export interface CompleteExtractionResult extends ExtractionResult {
+    // Tier 1 (new)
+    life_situation?: ExtractedLifeSituation;
+    immediate_intent?: ExtractedIntent;
+
+    // Tier 2 (new)
+    moral_signals?: ExtractedMoralSignal[];
+
+    // Tier 3 (new)
+    big_five_signals?: ExtractedBigFiveSignal[];
+    risk_tolerance?: ExtractedRiskSignal;
+    motivation_style?: ExtractedMotivationSignal;
+
+    // Tier 4 (new)
+    attachment_signals?: ExtractedAttachmentSignal;
+    locus_of_control?: ExtractedLocusSignal;
+    temporal_orientation?: ExtractedTemporalSignal;
+    growth_mindset?: ExtractedMindsetSignal;
+    tier4_signals?: ExtractedTier4Signals;
+}
+
+// =============================================================================
+// Database Row Types
+// =============================================================================
+
+export interface Goal {
+    id: string;
+    description: string;
+    status: 'stated' | 'in_progress' | 'achieved' | 'abandoned';
+    timeframe?: 'short_term' | 'medium_term' | 'long_term';
+    first_stated: string;
+    last_mentioned: string | null;
+}
+
+export interface PsychologicalSignal {
+    id: string;
+    dimension: string;
+    value: string;
+    confidence: number;
+    evidence_count: number;
+    last_updated: string;
 }
 
 declare global {

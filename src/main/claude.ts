@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { RESPONSE_SYSTEM_PROMPT, RESPONSE_USER_PROMPT } from './prompts/response.js';
+import { RESPONSE_SYSTEM_PROMPT, RESPONSE_USER_PROMPT, buildStyleGuidance } from './prompts/response.js';
 import { isMockEnabled, getMockResponse } from './claude-mock.js';
 import type { AssembledContext } from './context.js';
 
@@ -61,15 +61,17 @@ export async function sendMessage(userMessage: string): Promise<string> {
     return textBlock ? textBlock.text : '';
 }
 
+async function* simulateMockStream(response: string): AsyncGenerator<string> {
+    const words = response.split(' ');
+    for (const word of words) {
+        yield word + ' ';
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+}
+
 export async function* streamMessage(userMessage: string): AsyncGenerator<string> {
     if (mockMode) {
-        const response = getMockResponse(userMessage);
-        // Simulate streaming by yielding words
-        const words = response.split(' ');
-        for (const word of words) {
-            yield word + ' ';
-            await new Promise(resolve => setTimeout(resolve, 10));
-        }
+        yield* simulateMockStream(getMockResponse(userMessage));
         return;
     }
 
@@ -88,6 +90,26 @@ export async function* streamMessage(userMessage: string): AsyncGenerator<string
     }
 }
 
+interface ResponsePrompts {
+    system: string;
+    user: string;
+}
+
+function buildResponsePrompts(message: string, context: AssembledContext): ResponsePrompts {
+    const styleGuidance = buildStyleGuidance(context.supportStyle, context.currentIntent);
+
+    const system = RESPONSE_SYSTEM_PROMPT
+        .replace('{profile_summary}', context.profileSummary || 'No profile data yet.')
+        .replace('{relevant_messages}', context.relevantMessages || '')
+        .replace('{style_guidance}', styleGuidance);
+
+    const user = RESPONSE_USER_PROMPT
+        .replace('{recent_history}', context.recentHistory)
+        .replace('{current_message}', message);
+
+    return { system, user };
+}
+
 export async function generateResponse(
     message: string,
     context: AssembledContext
@@ -97,20 +119,13 @@ export async function generateResponse(
     }
 
     const anthropic = getClient();
-
-    const systemPrompt = RESPONSE_SYSTEM_PROMPT
-        .replace('{profile_summary}', context.profileSummary || 'No profile data yet.')
-        .replace('{relevant_messages}', context.relevantMessages || '');
-
-    const userPrompt = RESPONSE_USER_PROMPT
-        .replace('{recent_history}', context.recentHistory)
-        .replace('{current_message}', message);
+    const prompts = buildResponsePrompts(message, context);
 
     const response = await anthropic.messages.create({
         model: RESPONSE_MODEL,
         max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
+        system: prompts.system,
+        messages: [{ role: 'user', content: prompts.user }],
     });
 
     const textBlock = response.content.find(block => block.type === 'text');
@@ -122,31 +137,18 @@ export async function* streamResponse(
     context: AssembledContext
 ): AsyncGenerator<string> {
     if (mockMode) {
-        const response = getMockResponse(message);
-        // Simulate streaming by yielding words
-        const words = response.split(' ');
-        for (const word of words) {
-            yield word + ' ';
-            await new Promise(resolve => setTimeout(resolve, 10));
-        }
+        yield* simulateMockStream(getMockResponse(message));
         return;
     }
 
     const anthropic = getClient();
-
-    const systemPrompt = RESPONSE_SYSTEM_PROMPT
-        .replace('{profile_summary}', context.profileSummary || 'No profile data yet.')
-        .replace('{relevant_messages}', context.relevantMessages || '');
-
-    const userPrompt = RESPONSE_USER_PROMPT
-        .replace('{recent_history}', context.recentHistory)
-        .replace('{current_message}', message);
+    const prompts = buildResponsePrompts(message, context);
 
     const stream = anthropic.messages.stream({
         model: RESPONSE_MODEL,
         max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
+        system: prompts.system,
+        messages: [{ role: 'user', content: prompts.user }],
     });
 
     for await (const event of stream) {

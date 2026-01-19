@@ -40,8 +40,8 @@ export function registerIPCHandlers(): void {
         // Get recent history for context
         const recentMessages = getRecentMessages(conversation.id, 20);
 
-        // Assemble context
-        const context = await assembleContext(message, recentMessages);
+        // Assemble context (now includes conversationId for intent tracking)
+        const context = await assembleContext(message, recentMessages, conversation.id);
 
         // Generate response with context
         const response = await generateResponse(message, context);
@@ -50,7 +50,7 @@ export function registerIPCHandlers(): void {
         await saveMessage(conversation.id, 'assistant', response);
 
         // Run extraction in background (don't await)
-        runExtraction(userMessage.id).catch(err => {
+        runExtraction(userMessage.id, conversation.id).catch(err => {
             console.error('Extraction failed:', err);
         });
 
@@ -67,8 +67,8 @@ export function registerIPCHandlers(): void {
             // Get recent history for context
             const recentMessages = getRecentMessages(conversation.id, 20);
 
-            // Assemble context
-            const context = await assembleContext(message, recentMessages);
+            // Assemble context (now includes conversationId for intent tracking)
+            const context = await assembleContext(message, recentMessages, conversation.id);
 
             // Stream response
             let fullResponse = '';
@@ -83,7 +83,7 @@ export function registerIPCHandlers(): void {
             await saveMessage(conversation.id, 'assistant', fullResponse);
 
             // Run extraction in background
-            runExtraction(userMessage.id).catch(err => {
+            runExtraction(userMessage.id, conversation.id).catch(err => {
                 console.error('Extraction failed:', err);
             });
 
