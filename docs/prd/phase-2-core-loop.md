@@ -999,6 +999,519 @@ From existing schema in `src/main/db/sqlite.ts`:
 
 ---
 
+## Testing Strategy
+
+### Test Structure
+
+```
+tests/
+├── helpers/
+│   ├── electron.ts           # App launcher (exists)
+│   ├── fixtures.ts           # Test data, mock responses (new)
+│   └── db-utils.ts           # Database inspection helpers (new)
+├── unit/
+│   ├── extraction-validation.test.ts
+│   ├── context-assembly.test.ts
+│   └── confidence-scoring.test.ts
+├── integration/
+│   ├── message-persistence.spec.ts
+│   ├── extraction-pipeline.spec.ts
+│   ├── profile-updates.spec.ts
+│   └── context-responses.spec.ts
+└── e2e/
+    └── conversation-flow.spec.ts
+```
+
+### Testing Challenges & Solutions
+
+| Challenge | Solution |
+|-----------|----------|
+| Extraction is async/background | Expose `debug:waitForExtraction` IPC handler |
+| Need DB access for verification | Expose `debug:*` IPC handlers in test mode |
+| API costs during tests | Mock Claude for unit tests, real API for integration |
+| Test isolation (state bleed) | Use `NODE_ENV=test` with separate DB path |
+
+### Debug IPC Handlers (Test Mode Only)
+
+**File:** `src/main/ipc.ts` (add to registerIPCHandlers)
+
+```typescript
+// ==========================================================================
+// Debug Handlers (test mode only)
+// ==========================================================================
+
+if (process.env.NODE_ENV === 'test') {
+    ipcMain.handle('debug:getExtractions', async (_event, messageId?: string): Promise<Extraction[]> => {
+        const db = getDb();
+        if (messageId) {
+            return db.prepare(`SELECT * FROM extractions WHERE message_id = ?`).all(messageId) as Extraction[];
+        }
+        return db.prepare(`SELECT * FROM extractions ORDER BY created_at DESC LIMIT 10`).all() as Extraction[];
+    });
+
+    ipcMain.handle('debug:waitForExtraction', async (_event, messageId: string, timeoutMs: number = 5000): Promise<Extraction | null> => {
+        const db = getDb();
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < timeoutMs) {
+            const extraction = db.prepare(`SELECT * FROM extractions WHERE message_id = ?`).get(messageId) as Extraction | undefined;
+            if (extraction) return extraction;
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return null;
+    });
+
+    ipcMain.handle('debug:clearDatabase', async (): Promise<void> => {
+        const db = getDb();
+        db.exec(`
+            DELETE FROM evidence;
+            DELETE FROM extractions;
+            DELETE FROM maslow_signals;
+            DELETE FROM challenges;
+            DELETE FROM user_values;
+            DELETE FROM messages;
+            DELETE FROM conversations;
+        `);
+    });
+
+    ipcMain.handle('debug:getMessages', async (): Promise<Message[]> => {
+        const db = getDb();
+        return db.prepare(`SELECT * FROM messages ORDER BY created_at`).all() as Message[];
+    });
+}
+```
+
+### Test Helpers
+
+**File:** `tests/helpers/fixtures.ts` (new)
+
+```typescript
+export const TEST_MESSAGES = {
+    withValue: "Family is the most important thing to me. I'd do anything for them.",
+    withChallenge: "I've been really stressed about money lately. Bills are piling up.",
+    withGoal: "I want to learn to play guitar by the end of the year.",
+    withMaslow: "I haven't been sleeping well and my diet has been terrible.",
+    neutral: "The weather is nice today.",
+    multiSignal: "I value honesty above all else, but I'm struggling with a difficult conversation I need to have with my boss about a raise.",
+};
+
+export const EXPECTED_EXTRACTIONS = {
+    withValue: {
+        values: [{ name: expect.stringContaining('family'), value_type: 'stated' }],
+    },
+    withChallenge: {
+        challenges: [{ description: expect.stringContaining('money') }],
+    },
+};
+```
+
+**File:** `tests/helpers/db-utils.ts` (new)
+
+```typescript
+import { Page } from 'playwright';
+
+export async function clearTestDatabase(page: Page): Promise<void> {
+    await page.evaluate(async () => {
+        await (window as any).api.debug.clearDatabase();
+    });
+}
+
+export async function waitForExtraction(page: Page, messageId: string, timeout = 5000): Promise<any> {
+    return page.evaluate(async ({ messageId, timeout }) => {
+        return await (window as any).api.debug.waitForExtraction(messageId, timeout);
+    }, { messageId, timeout });
+}
+
+export async function getExtractions(page: Page, messageId?: string): Promise<any[]> {
+    return page.evaluate(async (msgId) => {
+        return await (window as any).api.debug.getExtractions(msgId);
+    }, messageId);
+}
+
+export async function getMessages(page: Page): Promise<any[]> {
+    return page.evaluate(async () => {
+        return await (window as any).api.debug.getMessages();
+    });
+}
+```
+
+### Unit Tests
+
+**File:** `tests/unit/extraction-validation.test.ts`
+
+```typescript
+import { describe, test, expect } from 'vitest';
+
+// Import the validation function directly (not through Electron)
+// This requires the function to be exported separately for testing
+import { validateExtraction } from '../../src/main/extraction.js';
+
+describe('Extraction Validation', () => {
+    describe('Quote Verification', () => {
+        test('accepts quotes that exist in message', () => {
+            const extraction = JSON.stringify({
+                values: [{ name: 'family', quote: 'I love my family' }],
+            });
+            const message = 'I love my family more than anything';
+
+            const result = validateExtraction(extraction, message);
+            expect(result.valid).toBe(true);
+            expect(result.errors).toHaveLength(0);
+        });
+
+        test('rejects fabricated quotes', () => {
+            const extraction = JSON.stringify({
+                values: [{ name: 'hatred', quote: 'I hate everything' }],
+            });
+            const message = 'I love my family';
+
+            const result = validateExtraction(extraction, message);
+            expect(result.valid).toBe(false);
+            expect(result.errors[0]).toContain('Quote not found');
+        });
+
+        test('handles whitespace normalization', () => {
+            const extraction = JSON.stringify({
+                values: [{ name: 'family', quote: 'I   love my  family' }],
+            });
+            const message = 'I love my family';
+
+            const result = validateExtraction(extraction, message);
+            expect(result.valid).toBe(true);
+        });
+
+        test('rejects invalid JSON', () => {
+            const extraction = 'not valid json {{{';
+            const message = 'any message';
+
+            const result = validateExtraction(extraction, message);
+            expect(result.valid).toBe(false);
+            expect(result.errors[0]).toContain('Invalid JSON');
+        });
+    });
+});
+```
+
+### Integration Tests
+
+**File:** `tests/integration/message-persistence.spec.ts`
+
+```typescript
+import { test, expect } from '@playwright/test';
+import { launchApp, closeApp, getPage } from '../helpers/electron';
+import { clearTestDatabase, getMessages } from '../helpers/db-utils';
+
+test.describe('US-101: Message Persistence', () => {
+    test.beforeAll(async () => {
+        await launchApp();
+    });
+
+    test.afterAll(async () => {
+        await closeApp();
+    });
+
+    test.beforeEach(async () => {
+        await clearTestDatabase(getPage());
+    });
+
+    test('user message is stored in database', async () => {
+        const page = getPage();
+
+        await page.evaluate(async () => {
+            await (window as any).api.chat.send('Test message for persistence');
+        });
+
+        const messages = await getMessages(page);
+
+        expect(messages.length).toBeGreaterThanOrEqual(2); // user + assistant
+        expect(messages.find(m => m.role === 'user')?.content).toContain('Test message');
+        expect(messages.find(m => m.role === 'assistant')).toBeDefined();
+    });
+
+    test('messages have valid timestamps', async () => {
+        const page = getPage();
+
+        const before = new Date().toISOString();
+        await page.evaluate(async () => {
+            await (window as any).api.chat.send('Timestamp test');
+        });
+        const after = new Date().toISOString();
+
+        const messages = await getMessages(page);
+        const userMsg = messages.find(m => m.role === 'user');
+
+        expect(userMsg?.created_at >= before).toBe(true);
+        expect(userMsg?.created_at <= after).toBe(true);
+    });
+
+    test('messages persist across history calls', async () => {
+        const page = getPage();
+
+        await page.evaluate(async () => {
+            await (window as any).api.chat.send('First message');
+            await (window as any).api.chat.send('Second message');
+        });
+
+        const history = await page.evaluate(async () => {
+            return await (window as any).api.messages.history();
+        });
+
+        expect(history.length).toBeGreaterThanOrEqual(4); // 2 user + 2 assistant
+    });
+});
+```
+
+**File:** `tests/integration/extraction-pipeline.spec.ts`
+
+```typescript
+import { test, expect } from '@playwright/test';
+import { launchApp, closeApp, getPage } from '../helpers/electron';
+import { clearTestDatabase, waitForExtraction, getExtractions } from '../helpers/db-utils';
+import { TEST_MESSAGES } from '../helpers/fixtures';
+
+test.describe('US-102: Extraction Pipeline', () => {
+    test.beforeAll(async () => {
+        await launchApp();
+    });
+
+    test.afterAll(async () => {
+        await closeApp();
+    });
+
+    test.beforeEach(async () => {
+        await clearTestDatabase(getPage());
+    });
+
+    test('extraction runs after user message', async () => {
+        const page = getPage();
+
+        // Send message and get the response (which includes message save)
+        const response = await page.evaluate(async (msg) => {
+            return await (window as any).api.chat.send(msg);
+        }, TEST_MESSAGES.withValue);
+
+        // Wait for background extraction
+        const messages = await page.evaluate(async () => {
+            return await (window as any).api.debug.getMessages();
+        });
+        const userMsg = messages.find(m => m.role === 'user');
+
+        const extraction = await waitForExtraction(page, userMsg.id, 10000);
+
+        expect(extraction).not.toBeNull();
+        expect(extraction.status).toBe('validated');
+    });
+
+    test('extraction includes source quotes', async () => {
+        const page = getPage();
+
+        await page.evaluate(async (msg) => {
+            return await (window as any).api.chat.send(msg);
+        }, TEST_MESSAGES.withValue);
+
+        // Wait for extraction
+        await page.waitForTimeout(3000);
+
+        const extractions = await getExtractions(page);
+        expect(extractions.length).toBeGreaterThan(0);
+
+        const parsed = JSON.parse(extractions[0].extraction_json);
+        expect(parsed.raw_quotes?.length).toBeGreaterThan(0);
+    });
+
+    test('invalid extraction is rejected', async () => {
+        // This test would require mocking Claude to return invalid data
+        // For now, we test the validation function directly in unit tests
+        test.skip();
+    });
+});
+```
+
+**File:** `tests/integration/profile-updates.spec.ts`
+
+```typescript
+import { test, expect } from '@playwright/test';
+import { launchApp, closeApp, getPage } from '../helpers/electron';
+import { clearTestDatabase, waitForExtraction } from '../helpers/db-utils';
+import { TEST_MESSAGES } from '../helpers/fixtures';
+
+test.describe('US-103: Profile Updates', () => {
+    test.beforeAll(async () => {
+        await launchApp();
+    });
+
+    test.afterAll(async () => {
+        await closeApp();
+    });
+
+    test.beforeEach(async () => {
+        await clearTestDatabase(getPage());
+    });
+
+    test('values are added to profile after extraction', async () => {
+        const page = getPage();
+
+        // Get initial profile
+        const initialProfile = await page.evaluate(async () => {
+            return await (window as any).api.profile.get();
+        });
+        const initialValueCount = initialProfile.top_values.length;
+
+        // Send message with clear value statement
+        await page.evaluate(async (msg) => {
+            return await (window as any).api.chat.send(msg);
+        }, TEST_MESSAGES.withValue);
+
+        // Wait for extraction to complete
+        await page.waitForTimeout(5000);
+
+        // Check profile updated
+        const updatedProfile = await page.evaluate(async () => {
+            return await (window as any).api.profile.get();
+        });
+
+        expect(updatedProfile.top_values.length).toBeGreaterThan(initialValueCount);
+    });
+
+    test('confidence increases on repeated mention', async () => {
+        const page = getPage();
+
+        // Send same value twice
+        await page.evaluate(async () => {
+            await (window as any).api.chat.send('Family means everything to me');
+        });
+        await page.waitForTimeout(3000);
+
+        const profile1 = await page.evaluate(async () => {
+            return await (window as any).api.profile.get();
+        });
+        const initialConfidence = profile1.top_values[0]?.confidence || 0;
+
+        await page.evaluate(async () => {
+            await (window as any).api.chat.send('I would do anything for my family');
+        });
+        await page.waitForTimeout(3000);
+
+        const profile2 = await page.evaluate(async () => {
+            return await (window as any).api.profile.get();
+        });
+
+        // Find the family-related value
+        const familyValue = profile2.top_values.find(v =>
+            v.name.toLowerCase().includes('family')
+        );
+
+        expect(familyValue?.confidence).toBeGreaterThan(initialConfidence);
+    });
+});
+```
+
+### E2E Conversation Flow Test
+
+**File:** `tests/e2e/conversation-flow.spec.ts`
+
+```typescript
+import { test, expect } from '@playwright/test';
+import { launchApp, closeApp, getPage } from '../helpers/electron';
+import { clearTestDatabase } from '../helpers/db-utils';
+
+test.describe('Full Conversation Flow', () => {
+    test.beforeAll(async () => {
+        await launchApp();
+    });
+
+    test.afterAll(async () => {
+        await closeApp();
+    });
+
+    test.beforeEach(async () => {
+        await clearTestDatabase(getPage());
+    });
+
+    test('multi-turn conversation with profile accumulation', async () => {
+        const page = getPage();
+
+        // Turn 1: Share a value
+        await page.evaluate(async () => {
+            await (window as any).api.chat.send(
+                'I really value being creative. Art and music are my escape.'
+            );
+        });
+
+        // Turn 2: Share a challenge
+        await page.evaluate(async () => {
+            await (window as any).api.chat.send(
+                "But lately I haven't had time for any of it. Work is consuming everything."
+            );
+        });
+
+        // Turn 3: Reference the tension
+        await page.evaluate(async () => {
+            await (window as any).api.chat.send(
+                'How do I find balance?'
+            );
+        });
+
+        // Wait for all extractions
+        await page.waitForTimeout(8000);
+
+        // Verify profile accumulated correctly
+        const profile = await page.evaluate(async () => {
+            return await (window as any).api.profile.get();
+        });
+
+        expect(profile.top_values.length).toBeGreaterThan(0);
+        expect(profile.active_challenges.length).toBeGreaterThan(0);
+
+        // Verify conversation history
+        const history = await page.evaluate(async () => {
+            return await (window as any).api.messages.history();
+        });
+
+        expect(history.length).toBe(6); // 3 user + 3 assistant
+    });
+});
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run unit tests only (fast, no Electron)
+npx vitest run tests/unit/
+
+# Run integration tests only
+npx playwright test tests/integration/
+
+# Run with UI for debugging
+make test-ui
+
+# Run specific test file
+npx playwright test tests/integration/extraction-pipeline.spec.ts
+```
+
+### Test Database Isolation
+
+**File:** `src/main/db/sqlite.ts` (modify initSQLite)
+
+```typescript
+export async function initSQLite(): Promise<void> {
+    if (db) return;
+
+    // Use separate database for tests
+    const dbName = process.env.NODE_ENV === 'test'
+        ? 'know-thyself-test.db'
+        : 'know-thyself.db';
+
+    const dbPath = path.join(app.getPath('userData'), dbName);
+    // ... rest of initialization
+}
+```
+
+---
+
 ## Risks & Mitigations
 | Risk | Impact | Mitigation |
 |------|--------|------------|
