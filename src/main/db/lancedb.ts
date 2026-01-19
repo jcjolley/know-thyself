@@ -4,12 +4,11 @@ import path from 'path';
 
 // Import types using relative path (not alias) for main process compatibility
 import type { MessageEmbedding, InsightEmbedding } from '../../shared/types.js';
+import { EMBEDDING_DIMENSIONS } from '../embeddings.js';
 
 let connection: lancedb.Connection | null = null;
 let messagesTable: lancedb.Table | null = null;
 let insightsTable: lancedb.Table | null = null;
-
-export const EMBEDDING_DIMENSIONS = 1024;
 
 export async function initLanceDB(): Promise<void> {
     if (connection) return;

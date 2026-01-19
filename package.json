@@ -7,9 +7,9 @@
   "scripts": {
     "dev": "npm run build:main && concurrently -k \"npm run watch:main\" \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
-    "dev:electron": "cross-env NODE_ENV=development wait-on http://localhost:5173 && electron .",
+    "dev:electron": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
     "watch:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput",
-    "build:main": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json",
+    "build:main": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/preload/package.json', '{\\\"type\\\":\\\"commonjs\\\"}')\"",
     "build": "npm run build:main && vite build && electron-builder",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit",
     "lint": "eslint src/",
@@ -21,10 +21,12 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "better-sqlite3": "^11.7.0",
-    "vectordb": "^0.14.0",
-    "@huggingface/transformers": "^3.4.0",
+    "dotenv": "^16.4.0",
+    "onnxruntime-node": "^1.20.0",
+    "tokenizers": "^0.13.3",
+    "tokenizers-win32-x64-msvc": "^0.13.4-rc1",
     "uuid": "^11.1.0",
-    "dotenv": "^16.4.0"
+    "vectordb": "^0.14.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",

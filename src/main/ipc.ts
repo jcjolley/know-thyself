@@ -68,7 +68,7 @@ export function registerIPCHandlers(): void {
         `).all() as MaslowSignal[];
 
         const values = db.prepare(`
-            SELECT * FROM values
+            SELECT * FROM user_values
             ORDER BY confidence DESC
             LIMIT 5
         `).all() as Value[];

@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 let client: Anthropic | null = null;
 
 // Use -latest alias for automatic updates
-const DEFAULT_MODEL = 'claude-haiku-4-5-latest';
+const DEFAULT_MODEL = 'claude-haiku-4-5';
 
 export function initClaude(): void {
     const apiKey = process.env.ANTHROPIC_API_KEY;

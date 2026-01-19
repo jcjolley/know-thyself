@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS extractions (
 );
 
 -- Structured profile data
-CREATE TABLE IF NOT EXISTS values (
+CREATE TABLE IF NOT EXISTS user_values (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
@@ -153,6 +153,6 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id
 CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_evidence_target ON evidence(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_extractions_message ON extractions(message_id);
-CREATE INDEX IF NOT EXISTS idx_values_confidence ON values(confidence DESC);
+CREATE INDEX IF NOT EXISTS idx_values_confidence ON user_values(confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_challenges_status ON challenges(status);
 `;
