@@ -1,6 +1,6 @@
 # Know Thyself
 
-AI-guided self-reflection desktop app. Users converse with Claude; system extracts psychological insights (values, challenges, Maslow signals) for pattern recognition.
+AI-guided self-reflection desktop app. Users converse with Claude; system extracts psychological insights to guide the user towards self actualization
 
 ## Quick Start
 
@@ -29,8 +29,20 @@ AI-guided self-reflection desktop app. Users converse with Claude; system extrac
 
 | Term | Meaning |
 |------|---------|
-| **Maslow signals** | User needs mapped to hierarchy (physiological → safety → belonging → esteem → self-actualization) |
-| **Extractions** | AI-parsed insights from conversation: values, challenges, patterns |
-| **Evidence** | Quotes from messages that support/link to extracted insights |
+| **Axis** | A psychological dimension tracked by the system (15+ total) |
+| **Extractions** | AI-parsed insights from conversation: values, challenges, signals |
+| **Evidence** | Quotes from messages that support extracted insights |
 | **Confidence** | 0.0-1.0 score indicating certainty of an extraction |
-| **Profile summary** | Computed psychological profile from accumulated signals |
+| **Completeness** | How much data exists for a given axis (0-100%) |
+| **Profile** | Accumulated signals across all psychological axes |
+
+### Psychological Axes
+
+See [`AXIS_REFERENCE_LIBRARY.md`](./AXIS_REFERENCE_LIBRARY.md) for full definitions, detection signals, and advice implications.
+
+| Tier | Axes | Purpose |
+|------|------|---------|
+| **1 - Essential** | Maslow Status, Support-Seeking Style, Life Situation, Immediate Intent | Avoid bad advice; gather first |
+| **2 - Early Inference** | Core Values (Schwartz), Challenges, Goals, Moral Foundations (Haidt) | Improve personalization |
+| **3 - Personality** | Big Five (OCEAN), Risk Tolerance, Motivation Style | Frame advice delivery |
+| **4 - Deeper Patterns** | Attachment Style, Locus of Control, Temporal Orientation, Growth Mindset, + more | Emerge over time |
