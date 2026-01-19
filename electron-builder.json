@@ -1,0 +1,27 @@
+{
+  "appId": "com.knowthyself.app",
+  "productName": "Know Thyself",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "src/shared",
+      "to": "shared",
+      "filter": ["**/*.js"]
+    }
+  ],
+  "win": {
+    "target": "nsis"
+  },
+  "mac": {
+    "target": "dmg"
+  },
+  "linux": {
+    "target": "AppImage"
+  }
+}
