@@ -68,10 +68,11 @@ Before implementing any user-facing features, we need a working application shel
 **So that** text can be embedded for semantic search
 
 **Acceptance Criteria:**
-- [ ] Console shows "Loading embedding model..." then "Embedding model loaded" on first run
-- [ ] `window.api.embeddings.embed("test")` returns array of exactly 1024 numbers
+- [ ] Console shows "Loading voyage-4-nano embedding model..." then "Embedding model loaded" on first run
+- [ ] `window.api.embeddings.embed("test")` returns array of exactly 2048 numbers
 - [ ] Calling embed with empty string throws Error with message "Cannot embed empty text"
 - [ ] Second call to embed completes in under 100ms (model already loaded)
+- [ ] Model files auto-download to `{userData}/models/voyage-4-nano/` on first run
 
 ### US-005: Claude API Integration
 **As a** developer
@@ -119,7 +120,8 @@ Set up the Electron + React + TypeScript project structure with all configuratio
     "@anthropic-ai/sdk": "^0.39.0",
     "better-sqlite3": "^11.7.0",
     "vectordb": "^0.14.0",
-    "@huggingface/transformers": "^3.4.0",
+    "onnxruntime-node": "^1.20.0",
+    "tokenizers": "^0.13.3",
     "uuid": "^11.1.0",
     "dotenv": "^16.4.0"
   },
@@ -817,12 +819,11 @@ import path from 'path';
 
 // Import types using relative path (not alias) for main process compatibility
 import type { MessageEmbedding, InsightEmbedding } from '../../shared/types.js';
+import { EMBEDDING_DIMENSIONS } from '../embeddings.js';
 
 let connection: lancedb.Connection | null = null;
 let messagesTable: lancedb.Table<MessageEmbedding> | null = null;
 let insightsTable: lancedb.Table<InsightEmbedding> | null = null;
-
-export const EMBEDDING_DIMENSIONS = 1024;
 
 export async function initLanceDB(): Promise<void> {
     if (connection) return;
@@ -915,31 +916,90 @@ export async function searchSimilarInsights(
 ---
 
 ### Phase 1.5: Embedding Model
-Load and use voyage-4-nano for local embeddings.
+Load and use voyage-4-nano for local embeddings via ONNX Runtime.
+
+> **Implementation Note:** The official `voyageai/voyage-4-nano` model is not available in ONNX format
+> on HuggingFace. We use the community ONNX conversion from `thomasht86/voyage-4-nano-ONNX` for the
+> model weights, and the official tokenizer from `voyageai/voyage-4-nano`. This approach runs locally
+> without requiring the Voyage AI API, while maintaining semantic alignment with Claude models.
+
+**Dependencies:**
+- `onnxruntime-node` - ONNX inference runtime for Node.js
+- `tokenizers` - HuggingFace tokenizers library (+ platform-specific binary)
 
 **File:** `src/main/embeddings.ts`
 
 ```typescript
-import { pipeline, type FeatureExtractionPipeline } from '@huggingface/transformers';
-import { EMBEDDING_DIMENSIONS } from './db/lancedb.js';
+import * as ort from 'onnxruntime-node';
+import { Tokenizer } from 'tokenizers';
+import { app } from 'electron';
+import path from 'path';
+import fs from 'fs/promises';
 
-let embedder: FeatureExtractionPipeline | null = null;
+const MODEL_REPO = 'thomasht86/voyage-4-nano-ONNX';
+const TOKENIZER_REPO = 'voyageai/voyage-4-nano';
+const MODEL_FILE = 'model_fp32.onnx';
+const TOKENIZER_FILE = 'tokenizer.json';
+
+// voyage-4-nano outputs 2048 dimensions
+export const EMBEDDING_DIMENSIONS = 2048;
+
+let session: ort.InferenceSession | null = null;
+let tokenizer: Tokenizer | null = null;
 let loadPromise: Promise<void> | null = null;
 
-const MODEL_NAME = 'voyageai/voyage-4-nano';
+async function downloadFile(url: string, destPath: string): Promise<void> {
+    console.log(`Downloading ${url}...`);
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Failed to download ${url}: ${response.status}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await fs.writeFile(destPath, buffer);
+}
+
+async function ensureModelFiles(): Promise<{ modelPath: string; tokenizerPath: string }> {
+    const modelDir = path.join(app.getPath('userData'), 'models', 'voyage-4-nano');
+    await fs.mkdir(modelDir, { recursive: true });
+
+    const modelPath = path.join(modelDir, MODEL_FILE);
+    const tokenizerPath = path.join(modelDir, TOKENIZER_FILE);
+
+    const modelBaseUrl = `https://huggingface.co/${MODEL_REPO}/resolve/main`;
+    const tokenizerBaseUrl = `https://huggingface.co/${TOKENIZER_REPO}/resolve/main`;
+
+    // Download model if not exists (~1.3GB for FP32)
+    try {
+        await fs.access(modelPath);
+    } catch {
+        await downloadFile(`${modelBaseUrl}/${MODEL_FILE}`, modelPath);
+    }
+
+    // Download tokenizer from official voyage-4-nano repo
+    try {
+        await fs.access(tokenizerPath);
+    } catch {
+        await downloadFile(`${tokenizerBaseUrl}/${TOKENIZER_FILE}`, tokenizerPath);
+    }
+
+    return { modelPath, tokenizerPath };
+}
 
 export async function initEmbeddings(): Promise<void> {
-    if (embedder) return;
+    if (session) return;
     if (loadPromise) {
         await loadPromise;
         return;
     }
 
     loadPromise = (async () => {
-        console.log('Loading embedding model...');
+        console.log('Loading voyage-4-nano embedding model...');
         const startTime = Date.now();
 
-        embedder = await pipeline('feature-extraction', MODEL_NAME);
+        const { modelPath, tokenizerPath } = await ensureModelFiles();
+
+        tokenizer = await Tokenizer.fromFile(tokenizerPath);
+        session = await ort.InferenceSession.create(modelPath);
 
         const elapsed = Date.now() - startTime;
         console.log(`Embedding model loaded in ${elapsed}ms`);
@@ -948,8 +1008,11 @@ export async function initEmbeddings(): Promise<void> {
     await loadPromise;
 }
 
-export async function embed(text: string, dimensions: number = EMBEDDING_DIMENSIONS): Promise<number[]> {
-    if (!embedder) {
+export async function embed(
+    text: string,
+    inputType: 'query' | 'document' = 'document'
+): Promise<number[]> {
+    if (!session || !tokenizer) {
         throw new Error('Embedding model not initialized. Call initEmbeddings() first.');
     }
 
@@ -957,17 +1020,34 @@ export async function embed(text: string, dimensions: number = EMBEDDING_DIMENSI
         throw new Error('Cannot embed empty text');
     }
 
-    const result = await embedder(text, { pooling: 'mean', normalize: true });
+    // Add query prompt for asymmetric retrieval
+    const inputText = inputType === 'query'
+        ? `Represent the query for retrieving supporting documents: ${text}`
+        : text;
 
-    // Extract array and truncate to desired dimensions (Matryoshka)
-    const fullVector = Array.from(result.data as Float32Array);
-    return fullVector.slice(0, dimensions);
+    const encoding = await tokenizer.encode(inputText);
+    const inputIds = encoding.getIds();
+    const attentionMask = encoding.getAttentionMask();
+
+    const inputIdsTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds.map(BigInt)), [1, inputIds.length]);
+    const attentionMaskTensor = new ort.Tensor('int64', BigInt64Array.from(attentionMask.map(BigInt)), [1, attentionMask.length]);
+
+    const results = await session.run({
+        input_ids: inputIdsTensor,
+        attention_mask: attentionMaskTensor,
+    });
+
+    const embeddings = results.embeddings.data as Float32Array;
+    return Array.from(embeddings);
 }
 
 export function isEmbeddingsReady(): boolean {
-    return embedder !== null;
+    return session !== null;
 }
 ```
+
+**Preload Script Note:** Electron preload scripts must be CommonJS. Add `dist/preload/package.json`
+with `{"type":"commonjs"}` during build to override the root `"type": "module"` setting.
 
 ---
 
@@ -1737,13 +1817,13 @@ test.describe('US-004: Embedding Generation', () => {
         await closeApp();
     });
 
-    test('embeddings.embed returns 1024-dimension vector', async () => {
+    test('embeddings.embed returns 2048-dimension vector', async () => {
         const page = getPage();
         const vector = await page.evaluate(async () => {
             return await (window as any).api.embeddings.embed('test message');
         });
         expect(Array.isArray(vector)).toBe(true);
-        expect(vector.length).toBe(1024);
+        expect(vector.length).toBe(2048);
         expect(typeof vector[0]).toBe('number');
     });
 
@@ -1839,10 +1919,12 @@ See `src/shared/types.ts` in Phase 1.2.
 ### Embedding Configuration
 | Setting | Value |
 |---------|-------|
-| Model | `voyageai/voyage-4-nano` |
-| Dimensions | 1024 (Matryoshka, can truncate to 256/512) |
-| Pooling | `mean` |
-| Normalization | `true` |
+| Model | `thomasht86/voyage-4-nano-ONNX` (FP32) |
+| Tokenizer | `voyageai/voyage-4-nano` |
+| Dimensions | 2048 (native output) |
+| Runtime | `onnxruntime-node` |
+| Model Size | ~1.3 GB (auto-downloaded on first run) |
+| Storage | `{userData}/models/voyage-4-nano/` |
 
 ### Database Locations
 | Database | Path |
@@ -1858,8 +1940,11 @@ Where `{userData}` is:
 ### Claude Model
 | Setting | Value |
 |---------|-------|
-| Model | `claude-sonnet-4-5-latest` |
+| Model | `claude-haiku-4-5` (development) |
 | Max tokens | 1024 |
+
+> **Note:** Use `claude-haiku-4-5` for development to minimize costs. Switch to `claude-sonnet-4-5-latest`
+> or `claude-opus-4-5-latest` for production as needed.
 
 ---
 
