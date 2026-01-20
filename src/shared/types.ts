@@ -529,6 +529,24 @@ export interface FullProfileSummary {
     last_updated: string | null;
 }
 
+// =============================================================================
+// Narrative Summary Types (Phase 3.2)
+// =============================================================================
+
+/**
+ * LLM-generated narrative synthesis of user's profile.
+ * Stored in profile_summary.narrative_json column.
+ */
+export interface NarrativeSummary {
+    identity_summary: string | null;
+    current_phase: string | null;
+    primary_concerns: string[];
+    emotional_baseline: string | null;
+    patterns_to_watch: string[];
+    recent_wins: string[];
+    recent_struggles: string[];
+}
+
 declare global {
     interface Window {
         api: ElectronAPI;

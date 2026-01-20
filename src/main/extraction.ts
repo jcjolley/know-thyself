@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDb } from './db/sqlite.js';
 import { getMessageById } from './db/messages.js';
 import { buildExtractionPrompt } from './prompts/extraction.js';
-import { isMockEnabled, getMockExtraction } from './claude-mock.js';
+import { isMockEnabled, getMockExtraction, getMockNarrative } from './claude-mock.js';
 import {
     updateLifeSituation,
     updateImmediateIntent,
@@ -20,7 +20,13 @@ import {
     updateTier4Signals,
     clearAllProfileData,
     getUserMessagesForConversation,
+    getExistingNarrative,
+    saveNarrativeSummary,
+    countMessagesSince,
+    getNarrativeGeneratedAt,
+    getCompleteProfile,
 } from './db/profile.js';
+import { NARRATIVE_SYNTHESIS_PROMPT, type NarrativeSummary } from './prompts/narrative-synthesis.js';
 import type { ReanalyzeProgress } from '../shared/types.js';
 import type { CompleteExtractionResult, Extraction } from '../shared/types.js';
 
@@ -113,6 +119,14 @@ export async function runExtraction(messageId: string, conversationId: string): 
             conversationId
         );
         console.log('[extraction] Applied to profile successfully');
+
+        // After extraction completes, check if narrative needs regeneration
+        if (shouldRegenerateNarrative()) {
+            // Run async - don't block
+            synthesizeNarrative().catch(err => {
+                console.error('[narrative] Background synthesis failed:', err);
+            });
+        }
     } else {
         console.log('[extraction] Skipping profile update due to validation failure');
     }
@@ -344,6 +358,117 @@ async function applyExtractionToProfile(
     if (extraction.tier4_signals) {
         updateTier4Signals(extraction.tier4_signals, messageId);
     }
+}
+
+// =============================================================================
+// Narrative Synthesis (Phase 3.2)
+// =============================================================================
+
+const NARRATIVE_MODEL = 'claude-haiku-4-5';
+
+/**
+ * Check if narrative regeneration is needed based on trigger conditions.
+ */
+export function shouldRegenerateNarrative(): boolean {
+    const lastGenerated = getNarrativeGeneratedAt();
+    const messagesSince = countMessagesSince(lastGenerated);
+    const existingNarrative = getExistingNarrative();
+
+    // Trigger conditions (any one triggers regeneration)
+    return (
+        !existingNarrative ||           // First time - no narrative exists
+        messagesSince >= 10             // 10+ messages since last generation
+    );
+}
+
+/**
+ * Generate narrative summary using Claude Haiku.
+ */
+export async function synthesizeNarrative(): Promise<NarrativeSummary | null> {
+    try {
+        let response: string;
+
+        if (isMockEnabled()) {
+            console.log('[narrative] Using mock narrative');
+            response = getMockNarrative();
+        } else {
+            const profile = getCompleteProfile();
+            const existingNarrative = getExistingNarrative();
+
+            // Build prompt with profile data
+            const prompt = NARRATIVE_SYNTHESIS_PROMPT
+                .replace('{profile_data}', JSON.stringify(profile, null, 2))
+                .replace('{existing_narrative}', existingNarrative
+                    ? JSON.stringify(existingNarrative, null, 2)
+                    : 'None (first generation)');
+
+            // Call Claude Haiku
+            response = await callHaikuForNarrative(prompt);
+        }
+
+        // Parse response
+        const narrative = parseNarrativeResponse(response);
+        if (!narrative) {
+            console.error('[narrative] Failed to parse response');
+            return null;
+        }
+
+        // Save to database
+        saveNarrativeSummary(narrative);
+        console.log('[narrative] Generated and saved narrative summary');
+
+        return narrative;
+    } catch (err) {
+        console.error('[narrative] Synthesis failed:', err);
+        return null;
+    }
+}
+
+/**
+ * Parse Claude's response into NarrativeSummary.
+ */
+function parseNarrativeResponse(response: string): NarrativeSummary | null {
+    try {
+        // Strip markdown code blocks if present
+        let json = response.trim();
+        if (json.startsWith('```')) {
+            json = json.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+        }
+
+        const parsed = JSON.parse(json);
+
+        // Validate required structure
+        return {
+            identity_summary: parsed.identity_summary ?? null,
+            current_phase: parsed.current_phase ?? null,
+            primary_concerns: Array.isArray(parsed.primary_concerns) ? parsed.primary_concerns : [],
+            emotional_baseline: parsed.emotional_baseline ?? null,
+            patterns_to_watch: Array.isArray(parsed.patterns_to_watch) ? parsed.patterns_to_watch : [],
+            recent_wins: Array.isArray(parsed.recent_wins) ? parsed.recent_wins : [],
+            recent_struggles: Array.isArray(parsed.recent_struggles) ? parsed.recent_struggles : [],
+        };
+    } catch (err) {
+        console.error('[narrative] JSON parse error:', err);
+        return null;
+    }
+}
+
+/**
+ * Call Claude Haiku for narrative synthesis.
+ * Separate from main chat to use cost-effective model.
+ */
+async function callHaikuForNarrative(prompt: string): Promise<string> {
+    // Create Anthropic client (follows existing pattern in extraction.ts)
+    const anthropic = new Anthropic();
+
+    const response = await anthropic.messages.create({
+        model: NARRATIVE_MODEL,
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }],
+    });
+
+    const textBlock = response.content.find(block => block.type === 'text');
+    return textBlock?.text ?? '';
 }
 
 // =============================================================================

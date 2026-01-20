@@ -22,6 +22,7 @@ import type {
     ProfileChallengeItem,
     ProfileGoalItem,
     ProfileSignalItem,
+    NarrativeSummary,
 } from '../../shared/types.js';
 
 // =============================================================================
@@ -568,9 +569,9 @@ export function getFullProfileSummary(): FullProfileSummary {
 
     // Get narrative summary from profile_summary table if it exists
     const summaryRow = db.prepare(`SELECT * FROM profile_summary WHERE id = 1`).get() as {
-        computed_summary?: string;
-        narrative_summary?: string;
-        updated_at?: string;
+        computed_json?: string;
+        narrative_json?: string;
+        narrative_generated_at?: string;
     } | undefined;
 
     let narrativeSummary: {
@@ -583,9 +584,9 @@ export function getFullProfileSummary(): FullProfileSummary {
         recent_struggles?: string[];
     } | null = null;
 
-    if (summaryRow?.narrative_summary) {
+    if (summaryRow?.narrative_json) {
         try {
-            narrativeSummary = JSON.parse(summaryRow.narrative_summary);
+            narrativeSummary = JSON.parse(summaryRow.narrative_json);
         } catch {
             // Invalid JSON, ignore
         }
@@ -626,4 +627,76 @@ export function getFullProfileSummary(): FullProfileSummary {
         has_data: hasData,
         last_updated: latestMessage?.created_at ?? null,
     };
+}
+
+// =============================================================================
+// Narrative Synthesis Helpers (Phase 3.2)
+// =============================================================================
+
+/**
+ * Initialize profile_summary row if it doesn't exist.
+ * Uses id=1 singleton pattern.
+ */
+export function ensureProfileSummaryRow(): void {
+    const db = getDb();
+    db.prepare(`
+        INSERT OR IGNORE INTO profile_summary (id, computed_json)
+        VALUES (1, '{}')
+    `).run();
+}
+
+/**
+ * Save narrative summary to profile_summary table.
+ */
+export function saveNarrativeSummary(narrative: NarrativeSummary): void {
+    const db = getDb();
+    const now = new Date().toISOString();
+    ensureProfileSummaryRow();
+    db.prepare(`
+        UPDATE profile_summary
+        SET narrative_json = ?, narrative_generated_at = ?
+        WHERE id = 1
+    `).run(JSON.stringify(narrative), now);
+}
+
+/**
+ * Get existing narrative if any.
+ */
+export function getExistingNarrative(): NarrativeSummary | null {
+    const db = getDb();
+    const row = db.prepare(`
+        SELECT narrative_json FROM profile_summary WHERE id = 1
+    `).get() as { narrative_json: string | null } | undefined;
+
+    if (!row?.narrative_json) return null;
+    try {
+        return JSON.parse(row.narrative_json);
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Count messages since a given timestamp.
+ */
+export function countMessagesSince(timestamp: string | null): number {
+    const db = getDb();
+    if (!timestamp) {
+        return (db.prepare(`SELECT COUNT(*) as count FROM messages WHERE role = 'user'`).get() as { count: number }).count;
+    }
+    return (db.prepare(`
+        SELECT COUNT(*) as count FROM messages
+        WHERE role = 'user' AND created_at > ?
+    `).get(timestamp) as { count: number }).count;
+}
+
+/**
+ * Get timestamp of last narrative generation.
+ */
+export function getNarrativeGeneratedAt(): string | null {
+    const db = getDb();
+    const row = db.prepare(`
+        SELECT narrative_generated_at FROM profile_summary WHERE id = 1
+    `).get() as { narrative_generated_at: string | null } | undefined;
+    return row?.narrative_generated_at ?? null;
 }

@@ -55,3 +55,16 @@ export function getMockContextPlan(): string {
 export function isMockEnabled(): boolean {
     return process.env.MOCK_CLAUDE === 'true';
 }
+
+export function getMockNarrative(): string {
+    const narrative = {
+        identity_summary: "You are a thoughtful individual navigating life's complexities with resilience.",
+        current_phase: "exploration",
+        primary_concerns: ["personal_growth", "work_life_balance"],
+        emotional_baseline: "reflective_and_curious",
+        patterns_to_watch: ["tendency to overthink"],
+        recent_wins: ["seeking self-understanding"],
+        recent_struggles: ["managing uncertainty"],
+    };
+    return JSON.stringify(narrative);
+}

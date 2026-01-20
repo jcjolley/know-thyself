@@ -41,8 +41,6 @@ The Self-Portrait page displays placeholder text ("Your story is still unfolding
 **Acceptance Criteria:**
 - [ ] Given no narrative exists (first time), when extraction completes, then narrative generation is triggered
 - [ ] Given 10+ messages have been processed since last narrative, when extraction completes, then narrative generation is triggered
-- [ ] Given a new value is discovered (evidence_count increases), when extraction completes, then narrative generation is triggered
-- [ ] Given a new challenge is identified, when extraction completes, then narrative generation is triggered
 
 ### US-003: Narrative Display
 **As a** user viewing my Self-Portrait
@@ -228,13 +226,14 @@ export interface NarrativeSummary {
 Add narrative synthesis functions alongside existing extraction logic:
 
 ```typescript
+import Anthropic from '@anthropic-ai/sdk';
 import { NARRATIVE_SYNTHESIS_PROMPT, type NarrativeSummary } from './prompts/narrative-synthesis.js';
 import {
     getExistingNarrative,
     saveNarrativeSummary,
     countMessagesSince,
     getNarrativeGeneratedAt,
-    getCompleteProfile,
+    getCompleteProfile,  // Already exists at line 399
 } from './db/profile.js';
 
 /**
@@ -322,11 +321,11 @@ function parseNarrativeResponse(response: string): NarrativeSummary | null {
  * Separate from main chat to use cost-effective model.
  */
 async function callHaikuForNarrative(prompt: string): Promise<string> {
-    // Use existing Anthropic client but with Haiku model
-    const anthropic = getAnthropicClient();  // Reuse existing client getter
+    // Create Anthropic client (follows existing pattern in extraction.ts)
+    const anthropic = new Anthropic();
 
     const response = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-latest',
+        model: 'claude-haiku-4-5',
         max_tokens: 1000,
         messages: [{ role: 'user', content: prompt }],
     });
@@ -455,7 +454,7 @@ CREATE TABLE profile_summary (
 No new IPC channels needed—existing `profile:getSummary` returns `FullProfileSummary` which already includes narrative fields.
 
 ### Claude API Usage
-- Model: `claude-haiku-4-5-latest` (cost-effective for synthesis)
+- Model: `claude-haiku-4-5` (cost-effective for synthesis)
 - Max tokens: 1000
 - Temperature: default
 
@@ -508,19 +507,6 @@ After all quality gates pass:
 
 ---
 
-## Implementation Order
-
-1. **Fix bug first**: Correct column name in `getFullProfileSummary()`
-2. Add database helper functions to `profile.ts`
-3. Create `src/main/prompts/narrative-synthesis.ts`
-4. Add synthesis functions to `extraction.ts`
-5. Integrate trigger check into extraction pipeline
-6. Add type export to `shared/types.ts`
-7. Manual verification against checklist
-8. Write Playwright tests
-
----
-
 ## Risks & Mitigations
 
 | Risk | Impact | Mitigation |
@@ -528,4 +514,3 @@ After all quality gates pass:
 | Haiku generates low-quality narratives | Medium | Clear examples in prompt; can upgrade to Sonnet if needed |
 | Narrative generation fails silently | Low | Logging added; UI handles null gracefully (shows placeholder) |
 | JSON parsing errors from Claude | Low | `parseNarrativeResponse()` wraps in try/catch, returns null on failure |
-| Anthropic client not accessible from extraction.ts | Medium | Refactor to expose `getAnthropicClient()` or pass client instance |
