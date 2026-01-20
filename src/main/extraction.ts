@@ -454,21 +454,42 @@ function parseNarrativeResponse(response: string): NarrativeSummary | null {
 }
 
 /**
- * Call Claude Haiku for narrative synthesis.
- * Separate from main chat to use cost-effective model.
+ * Call Claude Haiku for narrative synthesis with retry logic.
+ * Retries on 429 (rate limit) and 529 (overloaded) errors.
  */
 async function callHaikuForNarrative(prompt: string): Promise<string> {
-    // Create Anthropic client (follows existing pattern in extraction.ts)
     const anthropic = new Anthropic();
+    const maxRetries = 3;
+    let lastError: Error | null = null;
 
-    const response = await anthropic.messages.create({
-        model: NARRATIVE_MODEL,
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }],
-    });
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const response = await anthropic.messages.create({
+                model: NARRATIVE_MODEL,
+                max_tokens: 1000,
+                messages: [{ role: 'user', content: prompt }],
+            });
 
-    const textBlock = response.content.find(block => block.type === 'text');
-    return textBlock?.text ?? '';
+            const textBlock = response.content.find(block => block.type === 'text');
+            return textBlock?.text ?? '';
+        } catch (err) {
+            lastError = err as Error;
+            const status = (err as { status?: number }).status;
+
+            // Retry on rate limit (429) or overloaded (529)
+            if (status === 429 || status === 529) {
+                const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+                console.log(`[narrative] API returned ${status}, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+
+            // Don't retry other errors
+            throw err;
+        }
+    }
+
+    throw lastError ?? new Error('Max retries exceeded');
 }
 
 // =============================================================================
