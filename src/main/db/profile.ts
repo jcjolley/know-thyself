@@ -25,37 +25,38 @@ import type {
 
 export function updateLifeSituation(
     extractionId: string,
-    situation: ExtractedLifeSituation
+    situation: ExtractedLifeSituation,
+    messageId: string
 ): void {
     if (situation.work?.status && situation.work.status !== 'unknown') {
-        upsertPsychSignal('life_situation.work_status', situation.work.status, situation.work.quote);
+        upsertPsychSignal('life_situation.work_status', situation.work.status, situation.work.quote, 0.1, messageId);
         if (situation.work.description) {
-            upsertPsychSignal('life_situation.work_description', situation.work.description, situation.work.quote);
+            upsertPsychSignal('life_situation.work_description', situation.work.description, situation.work.quote, 0.1, messageId);
         }
     }
 
     if (situation.relationship?.status && situation.relationship.status !== 'unknown') {
-        upsertPsychSignal('life_situation.relationship_status', situation.relationship.status, situation.relationship.quote);
+        upsertPsychSignal('life_situation.relationship_status', situation.relationship.status, situation.relationship.quote, 0.1, messageId);
     }
 
     if (situation.family) {
         if (situation.family.has_children !== undefined) {
-            upsertPsychSignal('life_situation.has_children', String(situation.family.has_children), situation.family.quote);
+            upsertPsychSignal('life_situation.has_children', String(situation.family.has_children), situation.family.quote, 0.1, messageId);
         }
         if (situation.family.children_details) {
-            upsertPsychSignal('life_situation.children_details', situation.family.children_details, situation.family.quote);
+            upsertPsychSignal('life_situation.children_details', situation.family.children_details, situation.family.quote, 0.1, messageId);
         }
     }
 
     if (situation.living?.situation) {
-        upsertPsychSignal('life_situation.living', situation.living.situation, situation.living.quote);
+        upsertPsychSignal('life_situation.living', situation.living.situation, situation.living.quote, 0.1, messageId);
         if (situation.living.location) {
-            upsertPsychSignal('life_situation.location', situation.living.location, situation.living.quote);
+            upsertPsychSignal('life_situation.location', situation.living.location, situation.living.quote, 0.1, messageId);
         }
     }
 
     if (situation.age_stage && situation.age_stage !== 'unknown') {
-        upsertPsychSignal('life_situation.age_stage', situation.age_stage);
+        upsertPsychSignal('life_situation.age_stage', situation.age_stage, undefined, 0.1, messageId);
     }
 }
 
@@ -65,7 +66,8 @@ export function updateLifeSituation(
 
 export function updateImmediateIntent(
     conversationId: string,
-    intent: ExtractedIntent
+    intent: ExtractedIntent,
+    messageId: string
 ): void {
     const db = getDb();
     const now = new Date().toISOString();
@@ -84,7 +86,7 @@ export function updateImmediateIntent(
     `).run(uuidv4(), dimension, JSON.stringify(intent), intent.confidence, now);
 
     // Also store the general pattern (what kind of conversations do they have?)
-    upsertPsychSignal('intent.pattern.' + intent.type, intent.type, intent.quote, 0.1);
+    upsertPsychSignal('intent.pattern.' + intent.type, intent.type, intent.quote, 0.1, messageId);
 }
 
 export function getCurrentIntent(conversationId: string): ExtractedIntent | null {
@@ -107,26 +109,12 @@ export function updateMoralFoundations(
     signals: ExtractedMoralSignal[],
     messageId: string
 ): void {
-    const db = getDb();
-    const now = new Date().toISOString();
-
     for (const signal of signals) {
         const dimension = `moral.${signal.foundation}`;
         const strengthMultiplier = signal.strength === 'strong' ? 0.15 : signal.strength === 'moderate' ? 0.1 : 0.05;
 
-        upsertPsychSignal(dimension, signal.valence, signal.quote, strengthMultiplier);
-
-        // Store evidence
-        const signalRow = db.prepare(`
-            SELECT id FROM psychological_signals WHERE dimension = ?
-        `).get(dimension) as { id: string } | undefined;
-
-        if (signalRow) {
-            db.prepare(`
-                INSERT INTO evidence (id, target_type, target_id, message_id, quote, created_at)
-                VALUES (?, 'moral_foundation', ?, ?, ?, ?)
-            `).run(uuidv4(), signalRow.id, messageId, signal.quote, now);
-        }
+        // upsertPsychSignal now handles evidence storage
+        upsertPsychSignal(dimension, signal.valence, signal.quote, strengthMultiplier, messageId);
     }
 }
 
@@ -194,10 +182,11 @@ export function getActiveGoals(limit: number = 5): Goal[] {
 
 export function updateSupportSeekingStyle(
     style: SupportSeekingStyle,
-    quote?: string
+    quote?: string,
+    messageId?: string
 ): void {
     if (style === 'unclear') return;
-    upsertPsychSignal('support_seeking_style', style, quote, 0.15);
+    upsertPsychSignal('support_seeking_style', style, quote, 0.15, messageId);
 }
 
 export function getSupportSeekingStyle(): { style: SupportSeekingStyle; confidence: number } | null {
@@ -219,8 +208,15 @@ function upsertPsychSignal(
     dimension: string,
     value: string,
     quote?: string,
-    confidenceIncrement: number = 0.1
+    confidenceIncrement: number = 0.1,
+    messageId?: string
 ): void {
+    // CRITICAL: No evidence = no update. Every datapoint must have a supporting quote.
+    if (!quote || !messageId) {
+        console.log(`[profile] Skipping ${dimension} update - no evidence provided`);
+        return;
+    }
+
     const db = getDb();
     const now = new Date().toISOString();
 
@@ -229,8 +225,11 @@ function upsertPsychSignal(
         WHERE dimension = ?
     `).get(dimension) as { id: string; confidence: number; evidence_count: number } | undefined;
 
+    let signalId: string;
+
     if (existing) {
-        // Update: increase confidence, increment evidence count
+        signalId = existing.id;
+        // Update: increase confidence and evidence count
         const newConfidence = Math.min(0.95, existing.confidence + confidenceIncrement);
         db.prepare(`
             UPDATE psychological_signals
@@ -241,12 +240,19 @@ function upsertPsychSignal(
             WHERE dimension = ?
         `).run(value, newConfidence, now, dimension);
     } else {
-        // Insert new
+        // Insert new signal with evidence
+        signalId = uuidv4();
         db.prepare(`
             INSERT INTO psychological_signals (id, dimension, value, confidence, evidence_count, last_updated)
-            VALUES (?, ?, ?, ?, 1, ?)
-        `).run(uuidv4(), dimension, value, 0.5 + confidenceIncrement, now);
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(signalId, dimension, value, 0.5 + confidenceIncrement, 1, now);
     }
+
+    // Store the evidence
+    db.prepare(`
+        INSERT INTO evidence (id, target_type, target_id, message_id, quote, created_at)
+        VALUES (?, 'psychological_signal', ?, ?, ?, ?)
+    `).run(uuidv4(), signalId, messageId, quote, now);
 }
 
 // =============================================================================
@@ -292,8 +298,8 @@ function updateSignalWithEvidence(
     confidence: number,
     messageId: string
 ): void {
-    upsertPsychSignal(dimension, value, quote, confidence * 0.1);
-    storeEvidence(dimension, dimension, messageId, quote);
+    // upsertPsychSignal now handles evidence storage and requires quote
+    upsertPsychSignal(dimension, value, quote, confidence * 0.1, messageId);
 }
 
 export function updateBigFiveSignals(
@@ -302,8 +308,8 @@ export function updateBigFiveSignals(
 ): void {
     for (const signal of signals) {
         const dimension = `big_five.${signal.trait}`;
-        upsertPsychSignal(dimension, signal.level, signal.quote, signal.confidence * 0.1);
-        storeEvidence('big_five', dimension, messageId, signal.quote);
+        // upsertPsychSignal now handles evidence storage and requires quote
+        upsertPsychSignal(dimension, signal.level, signal.quote, signal.confidence * 0.1, messageId);
     }
 }
 
@@ -364,19 +370,6 @@ export function updateTier4Signals(signals: ExtractedTier4Signals, messageId: st
     }
 }
 
-// =============================================================================
-// Evidence Helper
-// =============================================================================
-
-function storeEvidence(targetType: string, targetId: string, messageId: string, quote?: string): void {
-    if (!quote) return;
-    const db = getDb();
-    const now = new Date().toISOString();
-    db.prepare(`
-        INSERT INTO evidence (id, target_type, target_id, message_id, quote, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `).run(uuidv4(), targetType, targetId, messageId, quote, now);
-}
 
 // =============================================================================
 // Complete Profile Query
@@ -440,12 +433,36 @@ export function getAllSignalsForAdmin(): AdminSignal[] {
 
 export function getEvidenceForDimension(dimension: string): SignalEvidence[] {
     const db = getDb();
-    return db.prepare(`
+    console.log('[evidence] Looking up dimension:', dimension);
+
+    // First get the signal ID for this dimension
+    const signal = db.prepare(`
+        SELECT id, evidence_count FROM psychological_signals WHERE dimension = ?
+    `).get(dimension) as { id: string; evidence_count: number } | undefined;
+
+    console.log('[evidence] Signal found:', signal);
+
+    if (!signal) return [];
+
+    // Query evidence by either:
+    // - signal UUID (used by upsertPsychSignal)
+    // - dimension string (used by storeEvidence for Big Five, Tier 3/4)
+    const evidence = db.prepare(`
         SELECT e.id, e.quote, e.message_id, e.created_at
         FROM evidence e
-        WHERE e.target_id = ?
+        WHERE e.target_id = ? OR e.target_id = ?
         ORDER BY e.created_at DESC
-    `).all(dimension) as SignalEvidence[];
+    `).all(signal.id, dimension) as SignalEvidence[];
+
+    console.log('[evidence] Evidence found:', evidence.length);
+
+    // Debug: show what target_ids exist in evidence table
+    const allTargetIds = db.prepare(`
+        SELECT DISTINCT target_type, target_id FROM evidence LIMIT 20
+    `).all();
+    console.log('[evidence] All target_ids in evidence table:', allTargetIds);
+
+    return evidence;
 }
 
 export function getAllGoals(): Goal[] {
@@ -453,4 +470,33 @@ export function getAllGoals(): Goal[] {
     return db.prepare(`
         SELECT * FROM goals ORDER BY last_mentioned DESC
     `).all() as Goal[];
+}
+
+// =============================================================================
+// Full Profile Reset (for re-analysis)
+// =============================================================================
+
+export function clearAllProfileData(_conversationId: string): void {
+    const db = getDb();
+
+    // Clear in order respecting foreign keys
+    // Note: Currently clears all profile data globally (single-user app)
+    db.exec(`
+        DELETE FROM evidence;
+        DELETE FROM extractions;
+        DELETE FROM psychological_signals;
+        DELETE FROM maslow_signals;
+        DELETE FROM user_values;
+        DELETE FROM challenges;
+        DELETE FROM goals;
+    `);
+}
+
+export function getUserMessagesForConversation(conversationId: string): { id: string; content: string }[] {
+    const db = getDb();
+    return db.prepare(`
+        SELECT id, content FROM messages
+        WHERE conversation_id = ? AND role = 'user'
+        ORDER BY created_at ASC
+    `).all(conversationId) as { id: string; content: string }[];
 }

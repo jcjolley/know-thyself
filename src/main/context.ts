@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from './db/sqlite.js';
 import { searchSimilarMessages } from './db/lancedb.js';
 import { embed, isEmbeddingsReady } from './embeddings.js';
@@ -8,19 +9,100 @@ import {
     getCompleteProfile,
     type CompleteProfile,
 } from './db/profile.js';
+import {
+    buildContextPlanningPrompt,
+    type ContextPlanResult,
+} from './prompts/context-planning.js';
+import { isMockEnabled, getMockContextPlan } from './claude-mock.js';
 import type { Message, Value, Challenge, MaslowSignal, Goal } from '../shared/types.js';
 
 // Minimum confidence to include a signal in context
 const MIN_CONFIDENCE = 0.5;
+const PLANNING_MODEL = 'claude-haiku-4-5';
 
 export interface AssembledContext {
     profileSummary: string;
     relevantMessages: string;
     recentHistory: string;
     tokenEstimate: number;
-    // New: structured data for response prompt
+    // Structured data for response prompt
     supportStyle: string | null;
     currentIntent: string | null;
+    questionType: string | null;
+}
+
+/**
+ * Call Haiku to determine what context is relevant for this question.
+ */
+async function planContext(
+    userQuestion: string,
+    briefProfile: string
+): Promise<ContextPlanResult | null> {
+    try {
+        let jsonStr: string;
+
+        if (isMockEnabled()) {
+            console.log('[context] Using mock context plan');
+            jsonStr = getMockContextPlan();
+        } else {
+            console.log('[context] Planning context with Haiku...');
+            const client = new Anthropic();
+            const prompt = buildContextPlanningPrompt({
+                userQuestion,
+                profileSummary: briefProfile,
+            });
+
+            const response = await client.messages.create({
+                model: PLANNING_MODEL,
+                max_tokens: 500,
+                messages: [{ role: 'user', content: prompt }],
+            });
+
+            const rawResponse = response.content[0].type === 'text'
+                ? response.content[0].text
+                : '';
+
+            // Strip markdown fences if present
+            jsonStr = rawResponse
+                .replace(/^```json\s*/i, '')
+                .replace(/^```\s*/i, '')
+                .replace(/\s*```$/i, '')
+                .trim();
+        }
+
+        const plan = JSON.parse(jsonStr) as ContextPlanResult;
+        console.log('[context] Plan:', plan.question_type, '- categories:', plan.categories_to_retrieve.map(c => c.category).join(', '));
+        return plan;
+    } catch (err) {
+        console.error('[context] Context planning failed, using full context:', err);
+        return null;
+    }
+}
+
+/**
+ * Get a brief profile summary for planning (before we know what to retrieve)
+ */
+function getBriefProfileForPlanning(): string {
+    const db = getDb();
+    const parts: string[] = [];
+
+    // Just get top values and recent challenges for planning
+    const values = db.prepare(`
+        SELECT name FROM user_values ORDER BY confidence DESC LIMIT 3
+    `).all() as { name: string }[];
+
+    const challenges = db.prepare(`
+        SELECT description FROM challenges WHERE status = 'active' LIMIT 2
+    `).all() as { description: string }[];
+
+    if (values.length > 0) {
+        parts.push(`Values: ${values.map(v => v.name).join(', ')}`);
+    }
+    if (challenges.length > 0) {
+        parts.push(`Challenges: ${challenges.map(c => c.description.slice(0, 50)).join('; ')}`);
+    }
+
+    return parts.join('\n') || 'New user, minimal profile data.';
 }
 
 export async function assembleContext(
@@ -30,7 +112,24 @@ export async function assembleContext(
 ): Promise<AssembledContext> {
     const db = getDb();
 
-    // Get profile data
+    // Step 1: Get brief profile for planning
+    const briefProfile = getBriefProfileForPlanning();
+
+    // Step 2: Call Haiku to plan what context to retrieve
+    const plan = await planContext(currentMessage, briefProfile);
+
+    // Determine which categories to retrieve
+    const categoriesToRetrieve = new Set<string>();
+    if (plan) {
+        for (const cat of plan.categories_to_retrieve) {
+            categoriesToRetrieve.add(cat.category);
+        }
+    }
+
+    // If planning failed or returned nothing, use all categories
+    const useFullContext = !plan || categoriesToRetrieve.size === 0;
+
+    // Step 3: Retrieve data based on plan (or full context as fallback)
     const values = db.prepare(`
         SELECT * FROM user_values ORDER BY confidence DESC LIMIT 5
     `).all() as Value[];
@@ -43,28 +142,46 @@ export async function assembleContext(
         SELECT * FROM maslow_signals ORDER BY created_at DESC LIMIT 5
     `).all() as MaslowSignal[];
 
-    // NEW: Extended profile data
     const goals = getActiveGoals(3);
     const supportStyle = getSupportSeekingStyle();
     const currentIntent = getCurrentIntent(conversationId);
     const completeProfile = getCompleteProfile();
 
-    // Build extended profile summary with all tiers
-    const profileSummary = buildCompleteProfileSummary(
+    // Step 4: Build profile summary with only relevant categories
+    const profileSummary = buildFilteredProfileSummary(
         values,
         challenges,
         maslowSignals,
         goals,
-        completeProfile
+        completeProfile,
+        useFullContext ? null : categoriesToRetrieve
     );
 
-    // Semantic search for relevant past messages (only if embeddings are ready)
+    // Step 5: Semantic search using plan's queries or the message itself
     let relevantMessages = '';
     if (isEmbeddingsReady()) {
         try {
-            const queryVector = await embed(currentMessage, 'query');
-            const similarMessages = await searchSimilarMessages(queryVector, 3);
-            relevantMessages = formatRelevantMessages(similarMessages);
+            // Use semantic queries from plan if available
+            const searchQueries = plan?.semantic_queries?.length
+                ? plan.semantic_queries
+                : [currentMessage];
+
+            const allResults: { content: string; role: string }[] = [];
+            for (const query of searchQueries.slice(0, 3)) {
+                const queryVector = await embed(query, 'query');
+                const results = await searchSimilarMessages(queryVector, 2);
+                allResults.push(...results);
+            }
+
+            // Deduplicate by content
+            const seen = new Set<string>();
+            const uniqueResults = allResults.filter(r => {
+                if (seen.has(r.content)) return false;
+                seen.add(r.content);
+                return true;
+            }).slice(0, 5);
+
+            relevantMessages = formatRelevantMessages(uniqueResults);
         } catch (err) {
             console.error('Failed to search similar messages:', err);
         }
@@ -85,6 +202,7 @@ export async function assembleContext(
         tokenEstimate,
         supportStyle: supportStyle?.style || null,
         currentIntent: currentIntent?.type || null,
+        questionType: plan?.question_type || null,
     };
 }
 
@@ -92,75 +210,98 @@ function isConfident(signal: { confidence: number } | null): signal is { confide
     return signal !== null && signal.confidence >= MIN_CONFIDENCE;
 }
 
-function buildCompleteProfileSummary(
+/**
+ * Check if a category should be included based on the plan.
+ * If categories is null, include everything (full context mode).
+ */
+function shouldInclude(category: string, categories: Set<string> | null): boolean {
+    if (categories === null) return true;
+    return categories.has(category);
+}
+
+function buildFilteredProfileSummary(
     values: Value[],
     challenges: Challenge[],
     maslowSignals: MaslowSignal[],
     goals: Goal[],
-    profile: CompleteProfile
+    profile: CompleteProfile,
+    categories: Set<string> | null
 ): string {
     const parts: string[] = [];
 
     // Life Context (factual - no confidence threshold, these are stated facts)
-    const ls = profile.lifeSituation;
-    if (Object.keys(ls).length > 0) {
-        parts.push('## Life Context');
-        if (ls.work_status) {
-            const desc = ls.work_description ? `: ${ls.work_description}` : '';
-            parts.push(`- Work: ${ls.work_status}${desc}`);
-        }
-        if (ls.relationship_status) {
-            parts.push(`- Relationship: ${ls.relationship_status}`);
-        }
-        if (ls.has_children === 'true') {
-            const details = ls.children_details ? ` (${ls.children_details})` : '';
-            parts.push(`- Has children${details}`);
-        }
-        if (ls.living) {
-            const loc = ls.location ? ` in ${ls.location}` : '';
-            parts.push(`- Living: ${ls.living}${loc}`);
+    if (shouldInclude('life_situation', categories)) {
+        const ls = profile.lifeSituation;
+        if (Object.keys(ls).length > 0) {
+            parts.push('## Life Context');
+            if (ls.work_status) {
+                const desc = ls.work_description ? `: ${ls.work_description}` : '';
+                parts.push(`- Work: ${ls.work_status}${desc}`);
+            }
+            if (ls.relationship_status) {
+                parts.push(`- Relationship: ${ls.relationship_status}`);
+            }
+            if (ls.has_children === 'true') {
+                const details = ls.children_details ? ` (${ls.children_details})` : '';
+                parts.push(`- Has children${details}`);
+            }
+            if (ls.living) {
+                const loc = ls.location ? ` in ${ls.location}` : '';
+                parts.push(`- Living: ${ls.living}${loc}`);
+            }
         }
     }
 
     // Maslow Concerns
-    const concerns = maslowSignals.filter(s => s.signal_type === 'concern');
-    if (concerns.length > 0) {
-        parts.push('\n## Areas of Concern');
-        for (const s of concerns) {
-            parts.push(`- ${s.level}: ${s.description}`);
+    if (shouldInclude('maslow_status', categories)) {
+        const concerns = maslowSignals.filter(s => s.signal_type === 'concern');
+        if (concerns.length > 0) {
+            parts.push('\n## Areas of Concern');
+            for (const s of concerns) {
+                parts.push(`- ${s.level}: ${s.description}`);
+            }
         }
     }
 
-    // Values & Goals
-    if (values.length > 0) {
-        parts.push('\n## What Matters to This Person');
-        for (const v of values) {
-            parts.push(`- ${v.name}: ${v.description}`);
+    // Values
+    if (shouldInclude('core_values', categories)) {
+        if (values.length > 0) {
+            parts.push('\n## What Matters to This Person');
+            for (const v of values) {
+                parts.push(`- ${v.name}: ${v.description}`);
+            }
         }
     }
 
-    if (goals.length > 0) {
-        parts.push('\n## Active Goals');
-        for (const g of goals) {
-            const status = g.status === 'in_progress' ? ' (working on)' : '';
-            parts.push(`- ${g.description}${status}`);
+    // Goals
+    if (shouldInclude('stated_goals', categories)) {
+        if (goals.length > 0) {
+            parts.push('\n## Active Goals');
+            for (const g of goals) {
+                const status = g.status === 'in_progress' ? ' (working on)' : '';
+                parts.push(`- ${g.description}${status}`);
+            }
         }
     }
 
     // Challenges
-    if (challenges.length > 0) {
-        parts.push('\n## Current Challenges');
-        for (const c of challenges) {
-            parts.push(`- ${c.description}`);
+    if (shouldInclude('active_challenges', categories)) {
+        if (challenges.length > 0) {
+            parts.push('\n## Current Challenges');
+            for (const c of challenges) {
+                parts.push(`- ${c.description}`);
+            }
         }
     }
 
     // Moral Foundations
-    const confidentMoral = profile.moralFoundations.filter(m => m.confidence >= MIN_CONFIDENCE);
-    if (confidentMoral.length > 0) {
-        parts.push('\n## Moral Sensitivities');
-        for (const m of confidentMoral) {
-            parts.push(`- Strong ${m.foundation} foundation`);
+    if (shouldInclude('moral_foundations', categories)) {
+        const confidentMoral = profile.moralFoundations.filter(m => m.confidence >= MIN_CONFIDENCE);
+        if (confidentMoral.length > 0) {
+            parts.push('\n## Moral Sensitivities');
+            for (const m of confidentMoral) {
+                parts.push(`- Strong ${m.foundation} foundation`);
+            }
         }
     }
 
@@ -168,25 +309,37 @@ function buildCompleteProfileSummary(
     const personalityParts: string[] = [];
 
     // Big Five traits
-    for (const t of profile.bigFive.filter(t => t.confidence >= MIN_CONFIDENCE)) {
-        personalityParts.push(`- ${t.trait}: ${t.level}`);
+    if (shouldInclude('personality_big_five', categories)) {
+        for (const t of profile.bigFive.filter(t => t.confidence >= MIN_CONFIDENCE)) {
+            personalityParts.push(`- ${t.trait}: ${t.level}`);
+        }
     }
 
-    // Single-value personality signals with labels
-    const personalitySignals: [typeof profile.riskTolerance, string][] = [
-        [profile.riskTolerance, 'Risk tolerance'],
-        [profile.motivationStyle, 'Motivation'],
-        [profile.attachmentStyle, 'Attachment'],
-        [profile.locusOfControl, 'Locus of control'],
-        [profile.temporalOrientation, 'Temporal focus'],
-        [profile.growthMindset, 'Mindset'],
-        [profile.selfEfficacy, 'Self-efficacy'],
+    // Single-value personality signals with labels and their category mapping
+    const personalitySignals: [typeof profile.riskTolerance, string, string][] = [
+        [profile.riskTolerance, 'Risk tolerance', 'risk_tolerance'],
+        [profile.motivationStyle, 'Motivation', 'motivation_style'],
+        [profile.attachmentStyle, 'Attachment', 'attachment_style'],
+        [profile.locusOfControl, 'Locus of control', 'locus_of_control'],
+        [profile.temporalOrientation, 'Temporal focus', 'temporal_orientation'],
+        [profile.growthMindset, 'Mindset', 'growth_mindset'],
+        [profile.selfEfficacy, 'Self-efficacy', 'emotional_patterns'],
     ];
 
-    for (const [signal, label] of personalitySignals) {
-        if (isConfident(signal)) {
+    for (const [signal, label, category] of personalitySignals) {
+        if (shouldInclude(category, categories) && isConfident(signal)) {
             const suffix = label === 'Motivation' ? '-oriented' : '';
             personalityParts.push(`- ${label}: ${signal.value}${suffix}`);
+        }
+    }
+
+    // Stress response and emotional regulation (emotional_patterns category)
+    if (shouldInclude('emotional_patterns', categories)) {
+        if (isConfident(profile.stressResponse)) {
+            personalityParts.push(`- Stress response: ${profile.stressResponse.value}`);
+        }
+        if (isConfident(profile.emotionalRegulation)) {
+            personalityParts.push(`- Emotional regulation: ${profile.emotionalRegulation.value}`);
         }
     }
 

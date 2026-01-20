@@ -37,6 +37,21 @@ export function getMockExtraction(message: string): string {
     return JSON.stringify(extraction);
 }
 
+export function getMockContextPlan(): string {
+    // Return a plan that retrieves common categories
+    const plan = {
+        question_type: 'other',
+        timeframe: 'present_focused',
+        categories_to_retrieve: [
+            { category: 'core_values', reason: 'Always relevant for personalization' },
+            { category: 'active_challenges', reason: 'Current struggles provide context' },
+        ],
+        semantic_queries: [],
+        special_considerations: 'Mock context plan for testing',
+    };
+    return JSON.stringify(plan);
+}
+
 export function isMockEnabled(): boolean {
     return process.env.MOCK_CLAUDE === 'true';
 }
