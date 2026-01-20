@@ -17,6 +17,11 @@ import type {
     SupportSeekingStyle,
     AdminSignal,
     SignalEvidence,
+    FullProfileSummary,
+    ProfileValueItem,
+    ProfileChallengeItem,
+    ProfileGoalItem,
+    ProfileSignalItem,
 } from '../../shared/types.js';
 
 // =============================================================================
@@ -499,4 +504,126 @@ export function getUserMessagesForConversation(conversationId: string): { id: st
         WHERE conversation_id = ? AND role = 'user'
         ORDER BY created_at ASC
     `).all(conversationId) as { id: string; content: string }[];
+}
+
+// =============================================================================
+// Profile Summary for Self-Portrait View (Phase 3)
+// =============================================================================
+
+export function getFullProfileSummary(): FullProfileSummary {
+    const db = getDb();
+
+    // Get counts for each category
+    const valuesCount = (db.prepare(`SELECT COUNT(*) as count FROM user_values`).get() as { count: number }).count;
+    const challengesCount = (db.prepare(`SELECT COUNT(*) as count FROM challenges WHERE status = 'active'`).get() as { count: number }).count;
+    const goalsCount = (db.prepare(`SELECT COUNT(*) as count FROM goals WHERE status IN ('stated', 'in_progress')`).get() as { count: number }).count;
+    const signalsCount = (db.prepare(`SELECT COUNT(*) as count FROM psychological_signals`).get() as { count: number }).count;
+
+    // Get actual values (top 10 by confidence)
+    const values = db.prepare(`
+        SELECT id, name, description, confidence
+        FROM user_values
+        ORDER BY confidence DESC, last_reinforced DESC
+        LIMIT 10
+    `).all() as ProfileValueItem[];
+
+    // Get actual challenges (active ones)
+    const challenges = db.prepare(`
+        SELECT id, description, status
+        FROM challenges
+        WHERE status = 'active'
+        ORDER BY last_mentioned DESC
+        LIMIT 10
+    `).all() as ProfileChallengeItem[];
+
+    // Get actual goals (active ones)
+    const goals = db.prepare(`
+        SELECT id, description, status, timeframe
+        FROM goals
+        WHERE status IN ('stated', 'in_progress')
+        ORDER BY last_mentioned DESC
+        LIMIT 10
+    `).all() as ProfileGoalItem[];
+
+    // Get psychological signals (excluding intent patterns and life situation details)
+    const signals = db.prepare(`
+        SELECT id, dimension, value, confidence
+        FROM psychological_signals
+        WHERE dimension NOT LIKE 'intent.%'
+        AND dimension NOT LIKE 'life_situation.%'
+        ORDER BY confidence DESC, last_updated DESC
+        LIMIT 15
+    `).all() as ProfileSignalItem[];
+
+    // Get Maslow concerns (deduplicated by level)
+    const maslowSignals = db.prepare(`
+        SELECT level, MAX(description) as description
+        FROM maslow_signals
+        WHERE signal_type = 'concern'
+        GROUP BY level
+        ORDER BY MAX(created_at) DESC
+        LIMIT 5
+    `).all() as { level: string; description: string | null }[];
+    const maslowConcerns = maslowSignals.map(s => s.level);
+
+    // Get narrative summary from profile_summary table if it exists
+    const summaryRow = db.prepare(`SELECT * FROM profile_summary WHERE id = 1`).get() as {
+        computed_summary?: string;
+        narrative_summary?: string;
+        updated_at?: string;
+    } | undefined;
+
+    let narrativeSummary: {
+        identity_summary?: string;
+        current_phase?: string;
+        primary_concerns?: string[];
+        emotional_baseline?: string;
+        patterns_to_watch?: string[];
+        recent_wins?: string[];
+        recent_struggles?: string[];
+    } | null = null;
+
+    if (summaryRow?.narrative_summary) {
+        try {
+            narrativeSummary = JSON.parse(summaryRow.narrative_summary);
+        } catch {
+            // Invalid JSON, ignore
+        }
+    }
+
+    // Determine if we have meaningful data
+    const hasData = valuesCount > 0 || challengesCount > 0 || goalsCount > 0 || signalsCount > 0 || maslowSignals.length > 0;
+
+    // Get the most recent update timestamp
+    const latestMessage = db.prepare(`
+        SELECT created_at FROM messages ORDER BY created_at DESC LIMIT 1
+    `).get() as { created_at: string } | undefined;
+
+    return {
+        // Narrative (from LLM synthesis, may be null)
+        identity_summary: narrativeSummary?.identity_summary ?? null,
+        current_phase: narrativeSummary?.current_phase ?? null,
+        primary_concerns: narrativeSummary?.primary_concerns ?? [],
+        emotional_baseline: narrativeSummary?.emotional_baseline ?? null,
+        patterns_to_watch: narrativeSummary?.patterns_to_watch ?? [],
+        recent_wins: narrativeSummary?.recent_wins ?? [],
+        recent_struggles: narrativeSummary?.recent_struggles ?? [],
+
+        // Actual items
+        values,
+        challenges,
+        goals,
+        signals,
+
+        // Computed counts
+        values_count: valuesCount,
+        challenges_count: challengesCount,
+        goals_count: goalsCount,
+        signals_count: signalsCount,
+        maslow_concerns: maslowConcerns,
+
+        // Metadata
+        has_data: hasData,
+        last_updated: latestMessage?.created_at ?? null,
+    };
 }

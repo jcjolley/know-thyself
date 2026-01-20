@@ -1,17 +1,19 @@
 interface TabNavigationProps {
-    activeTab: 'chat' | 'admin';
-    onTabChange: (tab: 'chat' | 'admin') => void;
+    activeTab: 'chat' | 'profile' | 'admin';
+    onTabChange: (tab: 'chat' | 'profile' | 'admin') => void;
     showAdminTab: boolean;
 }
 
-type TabId = 'chat' | 'admin';
+export type TabId = 'chat' | 'profile' | 'admin';
 
-function getTabButtonStyle(isActive: boolean): React.CSSProperties {
+function getTabButtonStyle(isActive: boolean, isProfileTab: boolean = false): React.CSSProperties {
+    // Profile tab uses warm accent color, others use blue
+    const activeColor = isProfileTab ? '#c4956a' : '#00d9ff';
     return {
         padding: '12px 20px',
         background: 'transparent',
         border: 'none',
-        borderBottom: isActive ? '2px solid #00d9ff' : '2px solid transparent',
+        borderBottom: isActive ? `2px solid ${activeColor}` : '2px solid transparent',
         color: isActive ? '#e6edf3' : '#7d8590',
         cursor: 'pointer',
         fontSize: 14,
@@ -22,12 +24,15 @@ function getTabButtonStyle(isActive: boolean): React.CSSProperties {
 }
 
 export function TabNavigation({ activeTab, onTabChange, showAdminTab }: TabNavigationProps) {
-    if (!showAdminTab) return null;
-
     const tabs: { id: TabId; label: string }[] = [
         { id: 'chat', label: 'Chat' },
-        { id: 'admin', label: 'Profile Admin' },
+        { id: 'profile', label: 'Your Self-Portrait' },
     ];
+
+    // Add admin tab only in debug mode
+    if (showAdminTab) {
+        tabs.push({ id: 'admin', label: 'Admin' });
+    }
 
     return (
         <div style={{
@@ -44,24 +49,26 @@ export function TabNavigation({ activeTab, onTabChange, showAdminTab }: TabNavig
                     <button
                         key={tab.id}
                         onClick={() => onTabChange(tab.id)}
-                        style={getTabButtonStyle(activeTab === tab.id)}
+                        style={getTabButtonStyle(activeTab === tab.id, tab.id === 'profile')}
                     >
                         {tab.label}
                     </button>
                 ))}
             </div>
-            <span style={{
-                padding: '4px 8px',
-                background: '#5c2525',
-                color: '#ff6b6b',
-                fontSize: 10,
-                fontWeight: 600,
-                borderRadius: 3,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-            }}>
-                DEBUG MODE
-            </span>
+            {showAdminTab && (
+                <span style={{
+                    padding: '4px 8px',
+                    background: '#5c2525',
+                    color: '#ff6b6b',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    borderRadius: 3,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                }}>
+                    DEBUG MODE
+                </span>
+            )}
         </div>
     );
 }

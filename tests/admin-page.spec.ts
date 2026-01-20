@@ -19,16 +19,16 @@ test.describe('Admin Page (Debug Mode)', () => {
 
         // Both tabs should be present
         const chatTab = page.locator('button:has-text("Chat")');
-        const adminTab = page.locator('button:has-text("Profile Admin")');
+        const adminTab = page.locator('button:has-text("Admin")');
         await expect(chatTab).toBeVisible();
         await expect(adminTab).toBeVisible();
     });
 
-    test('US-201: Clicking Profile Admin tab switches view', async () => {
+    test('US-201: Clicking Admin tab switches view', async () => {
         const page = getPage();
 
         // Click the Admin tab
-        await page.click('button:has-text("Profile Admin")');
+        await page.click('button:has-text("Admin")');
 
         // Wait for admin page to load
         await page.waitForTimeout(500);
@@ -84,7 +84,7 @@ test.describe('Admin Page (Debug Mode)', () => {
         const page = getPage();
 
         // Go back to admin tab
-        await page.click('button:has-text("Profile Admin")');
+        await page.click('button:has-text("Admin")');
         await page.waitForTimeout(300);
 
         // Tier 3 should be collapsed by default - click to expand
@@ -122,5 +122,58 @@ test.describe('Admin Page (Debug Mode)', () => {
         ]);
 
         expect(tabCount.filter(Boolean).length).toBeGreaterThanOrEqual(1);
+    });
+
+    test('US-206: Admin page shows Psychological Axes and Prompts tabs', async () => {
+        const page = getPage();
+
+        // Ensure we're on the Admin tab
+        await page.click('button:has-text("Admin")');
+        await page.waitForTimeout(300);
+
+        // Should see the two tabs
+        const axesTab = page.locator('[data-testid="axes-tab"]');
+        const promptsTab = page.locator('[data-testid="prompts-tab"]');
+
+        await expect(axesTab).toBeVisible();
+        await expect(promptsTab).toBeVisible();
+
+        // Axes tab should be active by default
+        await expect(axesTab).toHaveText('Psychological Axes');
+    });
+
+    test('US-206: Prompts tab shows empty state initially', async () => {
+        const page = getPage();
+
+        // Click the Prompts tab
+        const promptsTab = page.locator('[data-testid="prompts-tab"]');
+        await promptsTab.click();
+        await page.waitForTimeout(300);
+
+        // Should see the prompts tab content
+        const promptsContent = page.locator('[data-testid="prompts-tab-content"]');
+        await expect(promptsContent).toBeVisible();
+    });
+
+    test('US-206: Switching between Axes and Prompts tabs works', async () => {
+        const page = getPage();
+
+        // Should be on Prompts tab from previous test
+        // Click Axes tab
+        const axesTab = page.locator('[data-testid="axes-tab"]');
+        await axesTab.click();
+        await page.waitForTimeout(300);
+
+        // Should see tier sections again
+        await expect(page.locator('text=TIER 1: ESSENTIAL')).toBeVisible();
+
+        // Click Prompts tab again
+        const promptsTab = page.locator('[data-testid="prompts-tab"]');
+        await promptsTab.click();
+        await page.waitForTimeout(300);
+
+        // Should see prompts content
+        const promptsContent = page.locator('[data-testid="prompts-tab-content"]');
+        await expect(promptsContent).toBeVisible();
     });
 });

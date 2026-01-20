@@ -1,12 +1,12 @@
 import { ipcMain } from 'electron';
-import { generateResponse, streamResponse, isClaudeReady } from './claude.js';
+import { generateResponse, streamResponse, isClaudeReady, buildResponsePrompts } from './claude.js';
 import { embed, isEmbeddingsReady } from './embeddings.js';
 import { getDb } from './db/sqlite.js';
-import { getOrCreateConversation, saveMessage, getRecentMessages } from './db/messages.js';
-import { runExtraction } from './extraction.js';
+import { getOrCreateConversation, saveMessage, getRecentMessages, getMessagesWithPrompts, type MessageWithPrompt } from './db/messages.js';
+import { runExtraction, reanalyzeConversation } from './extraction.js';
 import { assembleContext } from './context.js';
-import { getAllSignalsForAdmin, getEvidenceForDimension, getAllGoals } from './db/profile.js';
-import type { ProfileSummary, MaslowSignal, Value, Challenge, AppStatus, Message, Extraction, AdminProfileData, SignalEvidence } from '../shared/types.js';
+import { getAllSignalsForAdmin, getEvidenceForDimension, getAllGoals, getFullProfileSummary } from './db/profile.js';
+import type { ProfileSummary, MaslowSignal, Value, Challenge, AppStatus, Message, Extraction, AdminProfileData, SignalEvidence, FullProfileSummary } from '../shared/types.js';
 
 let initError: string | null = null;
 
@@ -44,11 +44,15 @@ export function registerIPCHandlers(): void {
         // Assemble context (now includes conversationId for intent tracking)
         const context = await assembleContext(message, recentMessages, conversation.id);
 
+        // Build the prompt for logging
+        const prompts = buildResponsePrompts(message, context);
+        const fullPrompt = `=== SYSTEM PROMPT ===\n${prompts.system}\n\n=== USER PROMPT ===\n${prompts.user}`;
+
         // Generate response with context
         const response = await generateResponse(message, context);
 
-        // Save assistant response
-        await saveMessage(conversation.id, 'assistant', response);
+        // Save assistant response with the prompt that generated it
+        await saveMessage(conversation.id, 'assistant', response, fullPrompt);
 
         // Run extraction in background (don't await)
         runExtraction(userMessage.id, conversation.id).catch(err => {
@@ -71,6 +75,10 @@ export function registerIPCHandlers(): void {
             // Assemble context (now includes conversationId for intent tracking)
             const context = await assembleContext(message, recentMessages, conversation.id);
 
+            // Build the prompt for logging
+            const prompts = buildResponsePrompts(message, context);
+            const fullPrompt = `=== SYSTEM PROMPT ===\n${prompts.system}\n\n=== USER PROMPT ===\n${prompts.user}`;
+
             // Stream response
             let fullResponse = '';
             for await (const chunk of streamResponse(message, context)) {
@@ -80,8 +88,8 @@ export function registerIPCHandlers(): void {
                 }
             }
 
-            // Save complete response
-            await saveMessage(conversation.id, 'assistant', fullResponse);
+            // Save complete response with the prompt that generated it
+            await saveMessage(conversation.id, 'assistant', fullResponse, fullPrompt);
 
             // Run extraction in background
             runExtraction(userMessage.id, conversation.id).catch(err => {
@@ -139,6 +147,10 @@ export function registerIPCHandlers(): void {
             top_values: values,
             active_challenges: challenges,
         };
+    });
+
+    ipcMain.handle('profile:getSummary', async (): Promise<FullProfileSummary> => {
+        return getFullProfileSummary();
     });
 
     // ==========================================================================
@@ -212,6 +224,38 @@ export function registerIPCHandlers(): void {
 
         ipcMain.handle('admin:getEvidence', async (_event, dimension: string): Promise<SignalEvidence[]> => {
             return getEvidenceForDimension(dimension);
+        });
+
+        ipcMain.handle('admin:getMessagesWithPrompts', async (_event, limit: number = 50): Promise<MessageWithPrompt[]> => {
+            return getMessagesWithPrompts(limit);
+        });
+
+        ipcMain.handle('extraction:reanalyze', async (event): Promise<void> => {
+            const conversation = await getOrCreateConversation();
+            console.log('[reanalyze] Starting re-analysis for conversation:', conversation.id);
+
+            // Log user messages
+            const db = getDb();
+            const userMessages = db.prepare(`
+                SELECT id, content FROM messages
+                WHERE conversation_id = ? AND role = 'user'
+                ORDER BY created_at ASC
+            `).all(conversation.id) as { id: string; content: string }[];
+            console.log('[reanalyze] Found', userMessages.length, 'user messages');
+
+            await reanalyzeConversation(conversation.id, (progress) => {
+                console.log('[reanalyze] Progress:', progress);
+                if (!event.sender.isDestroyed()) {
+                    event.sender.send('extraction:progress', progress);
+                }
+            });
+
+            // Log extraction results
+            const extractions = db.prepare(`SELECT * FROM extractions ORDER BY created_at DESC LIMIT 10`).all();
+            console.log('[reanalyze] Extractions after re-analysis:', extractions.length);
+
+            const signals = db.prepare(`SELECT * FROM psychological_signals`).all();
+            console.log('[reanalyze] Psychological signals:', signals.length);
         });
     }
 }

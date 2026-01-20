@@ -90,12 +90,12 @@ export async function* streamMessage(userMessage: string): AsyncGenerator<string
     }
 }
 
-interface ResponsePrompts {
+export interface ResponsePrompts {
     system: string;
     user: string;
 }
 
-function buildResponsePrompts(message: string, context: AssembledContext): ResponsePrompts {
+export function buildResponsePrompts(message: string, context: AssembledContext): ResponsePrompts {
     const styleGuidance = buildStyleGuidance(context.supportStyle, context.currentIntent);
 
     const system = RESPONSE_SYSTEM_PROMPT

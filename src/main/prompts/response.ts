@@ -82,9 +82,13 @@ Your writing must sound human. Avoid these patterns that scream "AI wrote this":
 export const RESPONSE_USER_PROMPT = `
 {recent_history}
 
-User: {current_message}
+═══════════════════════════════════════════════════════════════
+CURRENT MESSAGE (respond to THIS message below, not the history above)
+═══════════════════════════════════════════════════════════════
 
-Respond thoughtfully, using the context you have about this person.
+{current_message}
+
+Respond thoughtfully to the CURRENT MESSAGE above, using the context you have about this person.
 `;
 
 export const STYLE_GUIDANCE: Record<string, string> = {

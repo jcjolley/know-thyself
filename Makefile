@@ -10,8 +10,9 @@
 install:
 	npm install
 
-# Start development servers (builds main first, then runs concurrently)
+# Start development servers (clean builds main first, then runs concurrently)
 dev:
+	rm -rf dist/main dist/preload
 	npm run dev
 
 # Build for production

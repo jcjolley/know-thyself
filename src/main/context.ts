@@ -363,12 +363,13 @@ function formatRelevantMessages(messages: { content: string; role: string }[]): 
 }
 
 function formatRecentHistory(messages: Message[]): string {
-    if (messages.length === 0) return '';
+    if (messages.length === 0) return '(No prior messages in this conversation)';
 
-    const parts = ['## Recent Conversation'];
+    const parts = ['## CONVERSATION HISTORY (for context only - do NOT respond to these)'];
     for (const m of messages) {
-        const speaker = m.role === 'user' ? 'User' : 'Assistant';
+        const speaker = m.role === 'user' ? '[PAST] User' : '[PAST] Assistant';
         parts.push(`${speaker}: ${m.content}`);
     }
+    parts.push('\n(End of conversation history)');
     return parts.join('\n');
 }

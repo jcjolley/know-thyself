@@ -29,7 +29,7 @@ test.describe('US-005: Claude API Integration', () => {
         await expect(button).toBeDisabled();
 
         // Type something and button should be enabled
-        const input = await page.locator('input[type="text"]').first();
+        const input = await page.locator('input[type="text"], textarea').first();
         await input.fill('test message');
         await expect(button).toBeEnabled();
     });

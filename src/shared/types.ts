@@ -29,6 +29,15 @@ export interface Message {
     created_at: string;
 }
 
+export interface MessageWithPrompt {
+    id: string;
+    conversation_id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    created_at: string;
+    prompt: string | null;
+}
+
 export interface Value {
     id: string;
     name: string;
@@ -178,6 +187,7 @@ export interface ElectronAPI {
     };
     profile: {
         get: () => Promise<ProfileSummary>;
+        getSummary: () => Promise<FullProfileSummary>;
     };
     embeddings: {
         embed: (text: string) => Promise<number[]>;
@@ -195,6 +205,10 @@ export interface ElectronAPI {
     admin?: {
         getProfile: () => Promise<AdminProfileData>;
         getEvidence: (dimension: string) => Promise<SignalEvidence[]>;
+        getMessagesWithPrompts: (limit?: number) => Promise<MessageWithPrompt[]>;
+        reanalyze: () => Promise<void>;
+        onReanalyzeProgress: (callback: (progress: ReanalyzeProgress) => void) => void;
+        removeReanalyzeProgressListener: () => void;
     };
 }
 
@@ -427,6 +441,92 @@ export interface AdminProfileData {
     challenges: Challenge[];
     goals: Goal[];
     maslowSignals: MaslowSignal[];
+}
+
+// =============================================================================
+// Re-Analyze Progress Types
+// =============================================================================
+
+export interface ReanalyzeProgress {
+    status: 'started' | 'processing' | 'completed' | 'error';
+    current: number;
+    total: number;
+    error?: string;
+}
+
+// =============================================================================
+// Profile View Types (Phase 3)
+// =============================================================================
+
+/**
+ * Simplified value item for display in profile summary.
+ */
+export interface ProfileValueItem {
+    id: string;
+    name: string;
+    description: string | null;
+    confidence: number;
+}
+
+/**
+ * Simplified challenge item for display in profile summary.
+ */
+export interface ProfileChallengeItem {
+    id: string;
+    description: string;
+    status: 'active' | 'resolved' | 'recurring';
+}
+
+/**
+ * Simplified goal item for display in profile summary.
+ */
+export interface ProfileGoalItem {
+    id: string;
+    description: string;
+    status: 'stated' | 'in_progress' | 'achieved' | 'abandoned';
+    timeframe?: string;
+}
+
+/**
+ * Simplified psychological signal for display in profile summary.
+ */
+export interface ProfileSignalItem {
+    id: string;
+    dimension: string;
+    value: string;
+    confidence: number;
+}
+
+/**
+ * Full profile summary for the "Your Self-Portrait" view.
+ * Combines narrative insights with computed data.
+ */
+export interface FullProfileSummary {
+    // Narrative (LLM-generated, may be null if not yet generated)
+    identity_summary: string | null;
+    current_phase: string | null;
+    primary_concerns: string[];
+    emotional_baseline: string | null;
+    patterns_to_watch: string[];
+    recent_wins: string[];
+    recent_struggles: string[];
+
+    // Actual items (top items sorted by confidence/recency)
+    values: ProfileValueItem[];
+    challenges: ProfileChallengeItem[];
+    goals: ProfileGoalItem[];
+    signals: ProfileSignalItem[];
+
+    // Computed counts
+    values_count: number;
+    challenges_count: number;
+    goals_count: number;
+    signals_count: number;
+    maslow_concerns: string[];
+
+    // Metadata
+    has_data: boolean;
+    last_updated: string | null;
 }
 
 declare global {

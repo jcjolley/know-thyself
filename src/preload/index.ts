@@ -1,5 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+// Define the ReanalyzeProgress interface inline to avoid import issues
+interface ReanalyzeProgress {
+    status: 'started' | 'processing' | 'completed' | 'error';
+    current: number;
+    total: number;
+    error?: string;
+}
+
 // Define the API interface inline to avoid import resolution issues in preload
 interface ElectronAPI {
     chat: {
@@ -15,6 +23,7 @@ interface ElectronAPI {
     };
     profile: {
         get: () => Promise<unknown>;
+        getSummary: () => Promise<unknown>;
     };
     embeddings: {
         embed: (text: string) => Promise<number[]>;
@@ -32,6 +41,10 @@ interface ElectronAPI {
     admin?: {
         getProfile: () => Promise<unknown>;
         getEvidence: (dimension: string) => Promise<unknown[]>;
+        getMessagesWithPrompts: (limit?: number) => Promise<unknown[]>;
+        reanalyze: () => Promise<void>;
+        onReanalyzeProgress: (callback: (progress: ReanalyzeProgress) => void) => void;
+        removeReanalyzeProgressListener: () => void;
     };
 }
 
@@ -59,6 +72,7 @@ const api: ElectronAPI = {
     },
     profile: {
         get: () => ipcRenderer.invoke('profile:get'),
+        getSummary: () => ipcRenderer.invoke('profile:getSummary'),
     },
     embeddings: {
         embed: (text: string) => ipcRenderer.invoke('embeddings:embed', text),
@@ -76,6 +90,14 @@ const api: ElectronAPI = {
     admin: {
         getProfile: () => ipcRenderer.invoke('admin:getProfile'),
         getEvidence: (dimension: string) => ipcRenderer.invoke('admin:getEvidence', dimension),
+        getMessagesWithPrompts: (limit?: number) => ipcRenderer.invoke('admin:getMessagesWithPrompts', limit),
+        reanalyze: () => ipcRenderer.invoke('extraction:reanalyze'),
+        onReanalyzeProgress: (callback: (progress: ReanalyzeProgress) => void) => {
+            ipcRenderer.on('extraction:progress', (_event, progress: ReanalyzeProgress) => callback(progress));
+        },
+        removeReanalyzeProgressListener: () => {
+            ipcRenderer.removeAllListeners('extraction:progress');
+        },
     },
 };
 

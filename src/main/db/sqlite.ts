@@ -19,6 +19,9 @@ export function initSQLite(): Database.Database {
     // Create tables
     db.exec(SCHEMA);
 
+    // Run migrations for existing databases
+    runMigrations(db);
+
     console.log('SQLite initialized');
 
     return db;
@@ -34,6 +37,29 @@ export function closeDb(): void {
         db.close();
         db = null;
         console.log('SQLite connection closed');
+    }
+}
+
+function runMigrations(database: Database.Database): void {
+    // Check if goals table has timeframe column
+    const goalsInfo = database.prepare("PRAGMA table_info(goals)").all() as { name: string }[];
+    const hasTimeframe = goalsInfo.some(col => col.name === 'timeframe');
+
+    if (!hasTimeframe) {
+        console.log('Migration: Adding timeframe column to goals table');
+        database.exec(`
+            ALTER TABLE goals ADD COLUMN timeframe TEXT
+            CHECK (timeframe IS NULL OR timeframe IN ('short_term', 'medium_term', 'long_term'))
+        `);
+    }
+
+    // Check if messages table has prompt column (for storing the prompt that generated assistant responses)
+    const messagesInfo = database.prepare("PRAGMA table_info(messages)").all() as { name: string }[];
+    const hasPrompt = messagesInfo.some(col => col.name === 'prompt');
+
+    if (!hasPrompt) {
+        console.log('Migration: Adding prompt column to messages table');
+        database.exec(`ALTER TABLE messages ADD COLUMN prompt TEXT`);
     }
 }
 

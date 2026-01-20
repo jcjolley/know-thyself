@@ -30,7 +30,8 @@ export async function getOrCreateConversation(): Promise<Conversation> {
 export async function saveMessage(
     conversationId: string,
     role: 'user' | 'assistant',
-    content: string
+    content: string,
+    prompt?: string
 ): Promise<Message> {
     const db = getDb();
     const id = uuidv4();
@@ -38,9 +39,9 @@ export async function saveMessage(
 
     // Store in SQLite
     db.prepare(`
-        INSERT INTO messages (id, conversation_id, role, content, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    `).run(id, conversationId, role, content, now);
+        INSERT INTO messages (id, conversation_id, role, content, created_at, prompt)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, conversationId, role, content, now, prompt || null);
 
     // Update conversation timestamp
     db.prepare(`
@@ -79,4 +80,24 @@ export function getRecentMessages(conversationId: string, limit: number = 20): M
 export function getMessageById(id: string): Message | undefined {
     const db = getDb();
     return db.prepare(`SELECT * FROM messages WHERE id = ?`).get(id) as Message | undefined;
+}
+
+export interface MessageWithPrompt {
+    id: string;
+    conversation_id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    created_at: string;
+    prompt: string | null;
+}
+
+export function getMessagesWithPrompts(limit: number = 50): MessageWithPrompt[] {
+    const db = getDb();
+    return db.prepare(`
+        SELECT id, conversation_id, role, content, created_at, prompt
+        FROM messages
+        WHERE role = 'assistant' AND prompt IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT ?
+    `).all(limit) as MessageWithPrompt[];
 }
