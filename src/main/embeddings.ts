@@ -1,8 +1,10 @@
-import * as ort from 'onnxruntime-node';
-import { Tokenizer } from 'tokenizers';
+import { fork, ChildProcess } from 'child_process';
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const MODEL_REPO = 'thomasht86/voyage-4-nano-ONNX';
 const TOKENIZER_REPO = 'voyageai/voyage-4-nano';
@@ -12,9 +14,10 @@ const TOKENIZER_FILE = 'tokenizer.json';
 // voyage-4-nano outputs 2048 dimensions
 export const EMBEDDING_DIMENSIONS = 2048;
 
-let session: ort.InferenceSession | null = null;
-let tokenizer: Tokenizer | null = null;
-let loadPromise: Promise<void> | null = null;
+let childProcess: ChildProcess | null = null;
+let isReady = false;
+let requestId = 0;
+const pendingRequests = new Map<number, { resolve: (value: number[]) => void; reject: (error: Error) => void }>();
 
 async function downloadFile(url: string, destPath: string): Promise<void> {
     console.log(`Downloading ${url}...`);
@@ -56,36 +59,75 @@ async function ensureModelFiles(): Promise<{ modelPath: string; tokenizerPath: s
 }
 
 export async function initEmbeddings(): Promise<void> {
-    if (session) return;
-    if (loadPromise) {
-        await loadPromise;
-        return;
-    }
+    if (childProcess) return;
 
-    loadPromise = (async () => {
-        console.log('Loading voyage-4-nano embedding model...');
-        const startTime = Date.now();
+    console.log('Loading voyage-4-nano embedding model in child process...');
 
-        const { modelPath, tokenizerPath } = await ensureModelFiles();
+    const { modelPath, tokenizerPath } = await ensureModelFiles();
 
-        // Load tokenizer using HuggingFace tokenizers library
-        tokenizer = await Tokenizer.fromFile(tokenizerPath);
+    return new Promise((resolve, reject) => {
+        const workerPath = path.join(__dirname, 'embeddings-worker.js');
 
-        // Load ONNX model
-        session = await ort.InferenceSession.create(modelPath);
+        // Use fork to create a separate Node.js process
+        childProcess = fork(workerPath, [], {
+            stdio: ['pipe', 'pipe', 'pipe', 'ipc']
+        });
 
-        const elapsed = Date.now() - startTime;
-        console.log(`Embedding model loaded in ${elapsed}ms`);
-    })();
+        // Forward stdout/stderr from child process
+        childProcess.stdout?.on('data', (data) => {
+            console.log(data.toString().trim());
+        });
+        childProcess.stderr?.on('data', (data) => {
+            console.error(data.toString().trim());
+        });
 
-    await loadPromise;
+        childProcess.on('message', (msg: { type: string; id?: number; result?: number[]; error?: string }) => {
+            if (msg.type === 'started') {
+                // Child process is ready to receive init message
+                childProcess?.send({ type: 'init', modelPath, tokenizerPath });
+            } else if (msg.type === 'ready') {
+                console.log('Embedding process ready');
+                isReady = true;
+                resolve();
+            } else if (msg.type === 'result') {
+                const pending = pendingRequests.get(msg.id!);
+                if (pending) {
+                    pending.resolve(msg.result!);
+                    pendingRequests.delete(msg.id!);
+                }
+            } else if (msg.type === 'error') {
+                if (msg.id !== undefined) {
+                    const pending = pendingRequests.get(msg.id);
+                    if (pending) {
+                        pending.reject(new Error(msg.error));
+                        pendingRequests.delete(msg.id);
+                    }
+                } else {
+                    reject(new Error(msg.error));
+                }
+            }
+        });
+
+        childProcess.on('error', (error) => {
+            console.error('Embedding process error:', error);
+            reject(error);
+        });
+
+        childProcess.on('exit', (code) => {
+            if (code !== 0) {
+                console.error(`Embedding process exited with code ${code}`);
+            }
+            childProcess = null;
+            isReady = false;
+        });
+    });
 }
 
 export async function embed(
     text: string,
     inputType: 'query' | 'document' = 'document'
 ): Promise<number[]> {
-    if (!session || !tokenizer) {
+    if (!childProcess || !isReady) {
         throw new Error('Embedding model not initialized. Call initEmbeddings() first.');
     }
 
@@ -93,31 +135,14 @@ export async function embed(
         throw new Error('Cannot embed empty text');
     }
 
-    // Add query prompt if needed
-    const inputText = inputType === 'query'
-        ? `Represent the query for retrieving supporting documents: ${text}`
-        : text;
+    const id = requestId++;
 
-    // Tokenize using HuggingFace tokenizers
-    const encoding = await tokenizer.encode(inputText);
-    const inputIds = encoding.getIds();
-    const attentionMask = encoding.getAttentionMask();
-
-    // Create tensors
-    const inputIdsTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds.map(BigInt)), [1, inputIds.length]);
-    const attentionMaskTensor = new ort.Tensor('int64', BigInt64Array.from(attentionMask.map(BigInt)), [1, attentionMask.length]);
-
-    // Run inference
-    const results = await session.run({
-        input_ids: inputIdsTensor,
-        attention_mask: attentionMaskTensor,
+    return new Promise((resolve, reject) => {
+        pendingRequests.set(id, { resolve, reject });
+        childProcess!.send({ type: 'embed', id, text, inputType });
     });
-
-    // Extract embeddings
-    const embeddings = results.embeddings.data as Float32Array;
-    return Array.from(embeddings);
 }
 
 export function isEmbeddingsReady(): boolean {
-    return session !== null;
+    return isReady;
 }

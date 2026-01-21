@@ -38,7 +38,6 @@ const cssVars = {
 export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProps) {
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<Message[]>([]);
-    const [streamingResponse, setStreamingResponse] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [status, setStatus] = useState<AppStatus | null>(null);
@@ -64,7 +63,7 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
     // Scroll to bottom when messages change
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, streamingResponse]);
+    }, [messages]);
 
     // Load message history when conversation changes
     useEffect(() => {
@@ -107,7 +106,6 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
 
         const userMessage = input.trim();
         setIsLoading(true);
-        setStreamingResponse('');
         setError(null);
         setInput('');
 
@@ -116,30 +114,45 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
             textareaRef.current.style.height = 'auto';
         }
 
-        // Optimistically add user message to UI
+        // Optimistically add user message AND assistant placeholder to UI
         const tempUserMessage: Message = {
-            id: `temp-${Date.now()}`,
+            id: `temp-user-${Date.now()}`,
             role: 'user',
             content: userMessage,
             created_at: new Date().toISOString(),
         };
-        setMessages(prev => [...prev, tempUserMessage]);
+        const tempAssistantMessage: Message = {
+            id: `temp-assistant-${Date.now()}`,
+            role: 'assistant',
+            content: '',
+            created_at: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, tempUserMessage, tempAssistantMessage]);
 
         // Set up streaming listeners
         window.api.chat.removeAllListeners();
 
         window.api.chat.onChunk((chunk: string) => {
-            setStreamingResponse(prev => prev + chunk);
+            // Stream directly into the assistant message
+            setMessages(prev => {
+                const updated = [...prev];
+                const lastMsg = updated[updated.length - 1];
+                if (lastMsg && lastMsg.role === 'assistant') {
+                    updated[updated.length - 1] = {
+                        ...lastMsg,
+                        content: lastMsg.content + chunk,
+                    };
+                }
+                return updated;
+            });
         });
 
         window.api.chat.onDone((payload?: ChatStreamDonePayload) => {
             setIsLoading(false);
-            // Reload history to get persisted messages with proper IDs
-            const convId = payload?.conversationId || conversationId;
-            window.api.messages.history(convId || undefined).then((history) => {
-                setMessages(history as Message[]);
-                setStreamingResponse('');
-            });
+            // Don't reload history - we already have the content streamed in.
+            // This avoids the flash caused by replacing temp IDs with database IDs.
+            // History will be properly loaded when navigating or on next refresh.
+
             // Notify parent of conversation update (title change, etc.)
             if (payload?.conversationId && onConversationUpdated) {
                 onConversationUpdated(payload.conversationId, payload.title);
@@ -150,9 +163,10 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
         window.api.chat.onError((err: string) => {
             setError(`Error: ${err}`);
             setIsLoading(false);
-            setStreamingResponse('');
-            // Remove optimistic user message on error
-            setMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
+            // Remove optimistic messages on error
+            setMessages(prev => prev.filter(m =>
+                m.id !== tempUserMessage.id && m.id !== tempAssistantMessage.id
+            ));
         });
 
         // Start streaming with conversationId
@@ -266,7 +280,7 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                     animation: 'fadeIn 0.5s ease-out 0.2s both',
                 }}
             >
-                {messages.length === 0 && !streamingResponse && (
+                {messages.length === 0 && (
                     <EmptyState />
                 )}
 
@@ -276,98 +290,9 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                         message={msg}
                         timestamp={formatTime(msg.created_at)}
                         index={index}
+                        isStreaming={isLoading && msg.id.startsWith('temp-assistant')}
                     />
                 ))}
-
-                {/* Streaming response */}
-                {streamingResponse && (
-                    <div style={{
-                        marginBottom: 20,
-                        animation: 'fadeIn 0.3s ease-out',
-                    }}>
-                        {/* Separator for current conversation */}
-                        {messages.length > 0 && (
-                            <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 12,
-                                marginBottom: 20,
-                                marginTop: 8,
-                            }}>
-                                <div style={{
-                                    flex: 1,
-                                    height: 1,
-                                    background: 'linear-gradient(to right, transparent, var(--chat-border), var(--chat-border))',
-                                }} />
-                                <span style={{
-                                    fontSize: 10,
-                                    fontWeight: 500,
-                                    color: 'var(--chat-text-muted)',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.1em',
-                                    opacity: 0.7,
-                                }}>
-                                    Now
-                                </span>
-                                <div style={{
-                                    flex: 1,
-                                    height: 1,
-                                    background: 'linear-gradient(to left, transparent, var(--chat-border), var(--chat-border))',
-                                }} />
-                            </div>
-                        )}
-                        <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            marginBottom: 8,
-                        }}>
-                            <span style={{
-                                fontSize: 11,
-                                fontWeight: 600,
-                                color: 'var(--chat-text-muted)',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.06em',
-                            }}>
-                                Assistant
-                            </span>
-                            <span style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                background: 'var(--chat-accent)',
-                                animation: 'pulse 1.5s ease-in-out infinite',
-                            }} />
-                        </div>
-                        <div style={{
-                            padding: '18px 22px',
-                            background: 'var(--chat-card)',
-                            borderRadius: 12,
-                            boxShadow: 'var(--chat-shadow)',
-                            border: '1px solid var(--chat-border)',
-                        }}>
-                            <p style={{
-                                fontFamily: 'Georgia, "Times New Roman", serif',
-                                fontSize: 15,
-                                lineHeight: 1.75,
-                                color: 'var(--chat-text)',
-                                margin: 0,
-                                whiteSpace: 'pre-wrap',
-                            }}>
-                                {streamingResponse}
-                                <span style={{
-                                    display: 'inline-block',
-                                    width: 2,
-                                    height: 18,
-                                    background: 'var(--chat-accent)',
-                                    marginLeft: 2,
-                                    verticalAlign: 'text-bottom',
-                                    animation: 'blink 1s step-end infinite',
-                                }} />
-                            </p>
-                        </div>
-                    </div>
-                )}
 
                 <div ref={messagesEndRef} />
             </div>
@@ -575,7 +500,7 @@ function StatusIndicator({ ready, label }: { ready?: boolean; label: string }) {
 }
 
 // Message Bubble Component
-function MessageBubble({ message, timestamp, index }: { message: Message; timestamp: string; index: number }) {
+function MessageBubble({ message, timestamp, index, isStreaming }: { message: Message; timestamp: string; index: number; isStreaming?: boolean }) {
     const isUser = message.role === 'user';
 
     return (
@@ -623,6 +548,17 @@ function MessageBubble({ message, timestamp, index }: { message: Message; timest
                     whiteSpace: 'pre-wrap',
                 }}>
                     {message.content}
+                    {isStreaming && (
+                        <span style={{
+                            display: 'inline-block',
+                            width: 2,
+                            height: '1em',
+                            marginLeft: 2,
+                            background: 'var(--chat-accent)',
+                            animation: 'blink 1s ease-in-out infinite',
+                            verticalAlign: 'text-bottom',
+                        }} />
+                    )}
                 </p>
             </div>
         </div>
