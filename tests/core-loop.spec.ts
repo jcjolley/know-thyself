@@ -167,13 +167,14 @@ test.describe('Phase 2: Core Loop', () => {
             const page = getPage();
 
             // Send a message
-            const response = await page.evaluate(async () => {
+            const result = await page.evaluate(async () => {
                 return await (window as any).api.chat.send('Hello, I am starting a new conversation.');
             });
 
-            // Response should be a non-empty string
-            expect(typeof response).toBe('string');
-            expect(response.length).toBeGreaterThan(0);
+            // Result should be an object with response string
+            expect(typeof result).toBe('object');
+            expect(typeof result.response).toBe('string');
+            expect(result.response.length).toBeGreaterThan(0);
         });
     });
 

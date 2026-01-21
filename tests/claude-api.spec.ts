@@ -16,8 +16,9 @@ test.describe('US-005: Claude API Integration', () => {
 
     test('chat input field exists', async () => {
         const page = getPage();
-        const input = await page.locator('input[type="text"], textarea');
-        await expect(input.first()).toBeVisible();
+        // Target the chat textarea specifically (not sidebar search)
+        const input = await page.locator('.chat-textarea');
+        await expect(input).toBeVisible();
     });
 
     test('send button exists and is enabled when input has text', async () => {
@@ -28,8 +29,8 @@ test.describe('US-005: Claude API Integration', () => {
         // Button is disabled without input text (expected behavior)
         await expect(button).toBeDisabled();
 
-        // Type something and button should be enabled
-        const input = await page.locator('input[type="text"], textarea').first();
+        // Type something in chat textarea (not sidebar search) and button should be enabled
+        const input = await page.locator('.chat-textarea');
         await input.fill('test message');
         await expect(button).toBeEnabled();
     });
@@ -37,8 +38,8 @@ test.describe('US-005: Claude API Integration', () => {
     test('typing message and sending shows response', async () => {
         const page = getPage();
 
-        // Type a message
-        const input = await page.locator('input[type="text"], textarea').first();
+        // Type a message in chat textarea
+        const input = await page.locator('.chat-textarea');
         await input.fill('Hello, this is a test');
 
         // Click send

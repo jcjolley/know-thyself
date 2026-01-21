@@ -21,6 +21,36 @@ export interface Conversation {
     updated_at: string;
 }
 
+// =============================================================================
+// Conversation Management Types (Phase 4.6)
+// =============================================================================
+
+export interface ConversationListItem {
+    id: string;
+    title: string;
+    created_at: string;
+    updated_at: string;
+    message_count: number;
+    preview: string | null;
+}
+
+export interface ConversationWithMessages extends Conversation {
+    title: string;
+    messages: Message[];
+}
+
+export interface ConversationSearchResult {
+    id: string;
+    title: string;
+    updated_at: string;
+    match_context: string;
+}
+
+export interface ChatStreamDonePayload {
+    conversationId: string;
+    title?: string;
+}
+
 export interface Message {
     id: string;
     conversation_id: string;
@@ -175,15 +205,24 @@ export interface AppStatus {
 
 export interface ElectronAPI {
     chat: {
-        send: (message: string) => Promise<string>;
-        stream: (message: string) => void;
+        send: (message: string, conversationId?: string) => Promise<{ response: string; conversationId: string; title?: string }>;
+        stream: (message: string, conversationId?: string) => void;
         onChunk: (callback: (chunk: string) => void) => void;
-        onDone: (callback: () => void) => void;
+        onDone: (callback: (payload?: ChatStreamDonePayload) => void) => void;
         onError: (callback: (error: string) => void) => void;
         removeAllListeners: () => void;
     };
     messages: {
-        history: () => Promise<Message[]>;
+        history: (conversationId?: string) => Promise<Message[]>;
+    };
+    conversations: {
+        list: () => Promise<ConversationListItem[]>;
+        create: () => Promise<Conversation & { title: string }>;
+        get: (id: string) => Promise<ConversationWithMessages | null>;
+        updateTitle: (id: string, title: string) => Promise<boolean>;
+        delete: (id: string) => Promise<boolean>;
+        search: (query: string) => Promise<ConversationSearchResult[]>;
+        getCurrent: () => Promise<(Conversation & { title: string }) | null>;
     };
     profile: {
         get: () => Promise<ProfileSummary>;

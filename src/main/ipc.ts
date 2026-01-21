@@ -3,10 +3,24 @@ import { generateResponse, streamResponse, isClaudeReady, buildResponsePrompts }
 import { embed, isEmbeddingsReady } from './embeddings.js';
 import { getDb } from './db/sqlite.js';
 import { getOrCreateConversation, saveMessage, getRecentMessages, getMessagesWithPrompts, type MessageWithPrompt } from './db/messages.js';
+import {
+    listConversations,
+    createConversation,
+    getConversationById,
+    updateConversationTitle,
+    deleteConversation,
+    searchConversations,
+    generateTitleFromMessage,
+    getMessageCount,
+    getMostRecentConversation,
+    type ConversationListItem,
+    type ConversationWithMessages,
+    type ConversationSearchResult,
+} from './db/conversations.js';
 import { runExtraction, reanalyzeConversation } from './extraction.js';
 import { assembleContext } from './context.js';
 import { getAllSignalsForAdmin, getEvidenceForDimension, getAllGoals, getFullProfileSummary } from './db/profile.js';
-import type { ProfileSummary, MaslowSignal, Value, Challenge, AppStatus, Message, Extraction, AdminProfileData, SignalEvidence, FullProfileSummary } from '../shared/types.js';
+import type { ProfileSummary, MaslowSignal, Value, Challenge, AppStatus, Message, Extraction, AdminProfileData, SignalEvidence, FullProfileSummary, Conversation } from '../shared/types.js';
 
 let initError: string | null = null;
 
@@ -32,8 +46,19 @@ export function registerIPCHandlers(): void {
     // Chat Handlers
     // ==========================================================================
 
-    ipcMain.handle('chat:send', async (_event, message: string): Promise<string> => {
-        const conversation = await getOrCreateConversation();
+    ipcMain.handle('chat:send', async (_event, message: string, conversationId?: string): Promise<{ response: string; conversationId: string; title?: string }> => {
+        // Use provided conversationId or get/create one
+        let conversation: Conversation & { title?: string };
+        if (conversationId) {
+            const existing = getConversationById(conversationId);
+            if (!existing) throw new Error(`Conversation not found: ${conversationId}`);
+            conversation = existing;
+        } else {
+            conversation = await getOrCreateConversation() as Conversation & { title?: string };
+        }
+
+        // Check if this is the first message (for title generation)
+        const messageCountBefore = getMessageCount(conversation.id);
 
         // Save user message
         const userMessage = await saveMessage(conversation.id, 'user', message);
@@ -54,17 +79,35 @@ export function registerIPCHandlers(): void {
         // Save assistant response with the prompt that generated it
         await saveMessage(conversation.id, 'assistant', response, fullPrompt);
 
+        // Auto-generate title on first user message
+        let newTitle: string | undefined;
+        if (messageCountBefore === 0) {
+            newTitle = generateTitleFromMessage(message);
+            updateConversationTitle(conversation.id, newTitle);
+        }
+
         // Run extraction in background (don't await)
         runExtraction(userMessage.id, conversation.id).catch(err => {
             console.error('Extraction failed:', err);
         });
 
-        return response;
+        return { response, conversationId: conversation.id, title: newTitle };
     });
 
-    ipcMain.on('chat:stream', async (event, message: string) => {
+    ipcMain.on('chat:stream', async (event, message: string, conversationId?: string) => {
         try {
-            const conversation = await getOrCreateConversation();
+            // Use provided conversationId or get/create one
+            let conversation: Conversation & { title?: string };
+            if (conversationId) {
+                const existing = getConversationById(conversationId);
+                if (!existing) throw new Error(`Conversation not found: ${conversationId}`);
+                conversation = existing;
+            } else {
+                conversation = await getOrCreateConversation() as Conversation & { title?: string };
+            }
+
+            // Check if this is the first message (for title generation)
+            const messageCountBefore = getMessageCount(conversation.id);
 
             // Save user message
             const userMessage = await saveMessage(conversation.id, 'user', message);
@@ -91,13 +134,20 @@ export function registerIPCHandlers(): void {
             // Save complete response with the prompt that generated it
             await saveMessage(conversation.id, 'assistant', fullResponse, fullPrompt);
 
+            // Auto-generate title on first user message
+            let newTitle: string | undefined;
+            if (messageCountBefore === 0) {
+                newTitle = generateTitleFromMessage(message);
+                updateConversationTitle(conversation.id, newTitle);
+            }
+
             // Run extraction in background
             runExtraction(userMessage.id, conversation.id).catch(err => {
                 console.error('Extraction failed:', err);
             });
 
             if (!event.sender.isDestroyed()) {
-                event.reply('chat:done');
+                event.reply('chat:done', { conversationId: conversation.id, title: newTitle });
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -111,9 +161,44 @@ export function registerIPCHandlers(): void {
     // Message History
     // ==========================================================================
 
-    ipcMain.handle('messages:history', async (): Promise<Message[]> => {
+    ipcMain.handle('messages:history', async (_event, conversationId?: string): Promise<Message[]> => {
+        if (conversationId) {
+            return getRecentMessages(conversationId, 50);
+        }
         const conversation = await getOrCreateConversation();
         return getRecentMessages(conversation.id, 50);
+    });
+
+    // ==========================================================================
+    // Conversation Management
+    // ==========================================================================
+
+    ipcMain.handle('conversations:list', async (): Promise<ConversationListItem[]> => {
+        return listConversations();
+    });
+
+    ipcMain.handle('conversations:create', async (): Promise<Conversation & { title: string }> => {
+        return createConversation();
+    });
+
+    ipcMain.handle('conversations:get', async (_event, id: string): Promise<ConversationWithMessages | null> => {
+        return getConversationById(id);
+    });
+
+    ipcMain.handle('conversations:updateTitle', async (_event, id: string, title: string): Promise<boolean> => {
+        return updateConversationTitle(id, title);
+    });
+
+    ipcMain.handle('conversations:delete', async (_event, id: string): Promise<boolean> => {
+        return deleteConversation(id);
+    });
+
+    ipcMain.handle('conversations:search', async (_event, query: string): Promise<ConversationSearchResult[]> => {
+        return searchConversations(query);
+    });
+
+    ipcMain.handle('conversations:getCurrent', async (): Promise<(Conversation & { title: string }) | null> => {
+        return getMostRecentConversation();
     });
 
     // ==========================================================================

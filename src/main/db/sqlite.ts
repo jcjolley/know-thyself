@@ -61,6 +61,15 @@ function runMigrations(database: Database.Database): void {
         console.log('Migration: Adding prompt column to messages table');
         database.exec(`ALTER TABLE messages ADD COLUMN prompt TEXT`);
     }
+
+    // Check if conversations table has title column
+    const conversationsInfo = database.prepare("PRAGMA table_info(conversations)").all() as { name: string }[];
+    const hasTitle = conversationsInfo.some(col => col.name === 'title');
+
+    if (!hasTitle) {
+        console.log('Migration: Adding title column to conversations table');
+        database.exec(`ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT 'New Conversation'`);
+    }
 }
 
 const SCHEMA = `

@@ -8,18 +8,33 @@ interface ReanalyzeProgress {
     error?: string;
 }
 
+// Define ChatStreamDonePayload inline to avoid import issues
+interface ChatStreamDonePayload {
+    conversationId: string;
+    title?: string;
+}
+
 // Define the API interface inline to avoid import resolution issues in preload
 interface ElectronAPI {
     chat: {
-        send: (message: string) => Promise<string>;
-        stream: (message: string) => void;
+        send: (message: string, conversationId?: string) => Promise<{ response: string; conversationId: string; title?: string }>;
+        stream: (message: string, conversationId?: string) => void;
         onChunk: (callback: (chunk: string) => void) => void;
-        onDone: (callback: () => void) => void;
+        onDone: (callback: (payload?: ChatStreamDonePayload) => void) => void;
         onError: (callback: (error: string) => void) => void;
         removeAllListeners: () => void;
     };
     messages: {
-        history: () => Promise<unknown[]>;
+        history: (conversationId?: string) => Promise<unknown[]>;
+    };
+    conversations: {
+        list: () => Promise<unknown[]>;
+        create: () => Promise<unknown>;
+        get: (id: string) => Promise<unknown | null>;
+        updateTitle: (id: string, title: string) => Promise<boolean>;
+        delete: (id: string) => Promise<boolean>;
+        search: (query: string) => Promise<unknown[]>;
+        getCurrent: () => Promise<unknown | null>;
     };
     profile: {
         get: () => Promise<unknown>;
@@ -50,13 +65,13 @@ interface ElectronAPI {
 
 const api: ElectronAPI = {
     chat: {
-        send: (message: string) => ipcRenderer.invoke('chat:send', message),
-        stream: (message: string) => ipcRenderer.send('chat:stream', message),
+        send: (message: string, conversationId?: string) => ipcRenderer.invoke('chat:send', message, conversationId),
+        stream: (message: string, conversationId?: string) => ipcRenderer.send('chat:stream', message, conversationId),
         onChunk: (callback: (chunk: string) => void) => {
             ipcRenderer.on('chat:chunk', (_event, chunk: string) => callback(chunk));
         },
-        onDone: (callback: () => void) => {
-            ipcRenderer.on('chat:done', () => callback());
+        onDone: (callback: (payload?: ChatStreamDonePayload) => void) => {
+            ipcRenderer.on('chat:done', (_event, payload?: ChatStreamDonePayload) => callback(payload));
         },
         onError: (callback: (error: string) => void) => {
             ipcRenderer.on('chat:error', (_event, error: string) => callback(error));
@@ -68,7 +83,16 @@ const api: ElectronAPI = {
         },
     },
     messages: {
-        history: () => ipcRenderer.invoke('messages:history'),
+        history: (conversationId?: string) => ipcRenderer.invoke('messages:history', conversationId),
+    },
+    conversations: {
+        list: () => ipcRenderer.invoke('conversations:list'),
+        create: () => ipcRenderer.invoke('conversations:create'),
+        get: (id: string) => ipcRenderer.invoke('conversations:get', id),
+        updateTitle: (id: string, title: string) => ipcRenderer.invoke('conversations:updateTitle', id, title),
+        delete: (id: string) => ipcRenderer.invoke('conversations:delete', id),
+        search: (query: string) => ipcRenderer.invoke('conversations:search', query),
+        getCurrent: () => ipcRenderer.invoke('conversations:getCurrent'),
     },
     profile: {
         get: () => ipcRenderer.invoke('profile:get'),

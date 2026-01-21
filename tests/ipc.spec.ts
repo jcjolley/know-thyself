@@ -18,13 +18,15 @@ test.describe('US-003: IPC Communication', () => {
         expect(hasApi).toBe(true);
     });
 
-    test('window.api.chat.send returns string response', async () => {
+    test('window.api.chat.send returns response object', async () => {
         const page = getPage();
-        const response = await page.evaluate(async () => {
+        const result = await page.evaluate(async () => {
             return await (window as any).api.chat.send('hello');
         });
-        expect(typeof response).toBe('string');
-        expect(response.length).toBeGreaterThan(0);
+        expect(typeof result).toBe('object');
+        expect(typeof result.response).toBe('string');
+        expect(result.response.length).toBeGreaterThan(0);
+        expect(typeof result.conversationId).toBe('string');
     });
 
     test('window.api.profile.get returns profile object', async () => {

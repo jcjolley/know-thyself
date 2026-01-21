@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { ChatStreamDonePayload } from '../../shared/types';
 
 interface AppStatus {
     embeddingsReady: boolean;
@@ -12,6 +13,11 @@ interface Message {
     role: 'user' | 'assistant';
     content: string;
     created_at: string;
+}
+
+interface ChatPageProps {
+    conversationId: string | null;
+    onConversationUpdated?: (conversationId: string, title?: string) => void;
 }
 
 // CSS Variables matching the Profile page
@@ -29,7 +35,7 @@ const cssVars = {
     '--chat-error': '#c45a4a',
 } as React.CSSProperties;
 
-export function ChatPage() {
+export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProps) {
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<Message[]>([]);
     const [streamingResponse, setStreamingResponse] = useState('');
@@ -60,18 +66,22 @@ export function ChatPage() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, streamingResponse]);
 
-    // Load message history on mount
+    // Load message history when conversation changes
     useEffect(() => {
         const loadHistory = async () => {
+            if (!conversationId) {
+                setMessages([]);
+                return;
+            }
             try {
-                const history = await window.api.messages.history() as Message[];
+                const history = await window.api.messages.history(conversationId) as Message[];
                 setMessages(history);
             } catch (err) {
                 console.error('Failed to load history:', err);
             }
         };
         loadHistory();
-    }, []);
+    }, [conversationId]);
 
     // Poll for app status
     useEffect(() => {
@@ -122,13 +132,18 @@ export function ChatPage() {
             setStreamingResponse(prev => prev + chunk);
         });
 
-        window.api.chat.onDone(() => {
+        window.api.chat.onDone((payload?: ChatStreamDonePayload) => {
             setIsLoading(false);
             // Reload history to get persisted messages with proper IDs
-            window.api.messages.history().then((history) => {
+            const convId = payload?.conversationId || conversationId;
+            window.api.messages.history(convId || undefined).then((history) => {
                 setMessages(history as Message[]);
                 setStreamingResponse('');
             });
+            // Notify parent of conversation update (title change, etc.)
+            if (payload?.conversationId && onConversationUpdated) {
+                onConversationUpdated(payload.conversationId, payload.title);
+            }
             textareaRef.current?.focus();
         });
 
@@ -140,9 +155,9 @@ export function ChatPage() {
             setMessages(prev => prev.filter(m => m.id !== tempUserMessage.id));
         });
 
-        // Start streaming
-        window.api.chat.stream(userMessage);
-    }, [input, isLoading]);
+        // Start streaming with conversationId
+        window.api.chat.stream(userMessage, conversationId || undefined);
+    }, [input, isLoading, conversationId, onConversationUpdated]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
