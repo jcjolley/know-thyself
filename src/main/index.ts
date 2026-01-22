@@ -10,6 +10,8 @@ import { initLanceDB } from "./db/lancedb.js";
 import { initEmbeddings } from "./embeddings.js";
 import { initClaude } from "./claude.js";
 import { registerIPCHandlers, setInitError } from "./ipc.js";
+import { initJourneyRegistry } from "./journeys.js";
+import { llmManager, loadLLMConfig, createOllamaProvider, createClaudeProvider } from "./llm/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === "development";
@@ -59,7 +61,27 @@ async function initialize(): Promise<void> {
     initSQLite();
     await initLanceDB();
 
-    console.log("\n[2/4] Initializing Claude client...");
+    console.log("\n[2/6] Initializing LLM manager...");
+    try {
+      // Register provider factories
+      llmManager.registerProviderFactories(createOllamaProvider, createClaudeProvider);
+
+      // Load config and initialize
+      const llmConfig = await loadLLMConfig();
+      console.log(`  Backend: ${llmConfig.backend}`);
+      if (llmConfig.backend === "ollama") {
+        console.log(`  Ollama URL: ${llmConfig.ollamaBaseUrl || "http://localhost:11434"}`);
+      }
+
+      await llmManager.initialize(llmConfig);
+      console.log("  LLM manager initialized");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.error("LLM manager initialization failed:", message);
+      // Don't fail - provider may become available later
+    }
+
+    console.log("\n[3/6] Initializing Claude client (legacy)...");
     try {
       initClaude();
     } catch (error) {
@@ -69,10 +91,13 @@ async function initialize(): Promise<void> {
       // Continue without Claude - app can still show the error in UI
     }
 
-    console.log("\n[3/4] Registering IPC handlers...");
+    console.log("\n[4/6] Registering IPC handlers...");
     registerIPCHandlers();
 
-    console.log("\n[4/4] Loading embedding model in worker thread...");
+    console.log("\n[5/6] Loading journey registry...");
+    initJourneyRegistry();
+
+    console.log("\n[6/6] Loading embedding model in worker thread...");
     // Load embeddings in a worker thread to avoid blocking the UI
     initEmbeddings().catch((err) => {
       console.error("Failed to load embeddings:", err);
@@ -90,9 +115,9 @@ async function initialize(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
-  // Create window first to avoid black screen, then initialize
-  await createWindow();
+  // Initialize BEFORE creating window so IPC handlers are ready
   await initialize();
+  await createWindow();
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {

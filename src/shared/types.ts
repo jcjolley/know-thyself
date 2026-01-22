@@ -32,10 +32,12 @@ export interface ConversationListItem {
     updated_at: string;
     message_count: number;
     preview: string | null;
+    journey_id: string | null;
 }
 
 export interface ConversationWithMessages extends Conversation {
     title: string;
+    journey_id: string | null;
     messages: Message[];
 }
 
@@ -248,6 +250,23 @@ export interface ElectronAPI {
         reanalyze: () => Promise<void>;
         onReanalyzeProgress: (callback: (progress: ReanalyzeProgress) => void) => void;
         removeReanalyzeProgressListener: () => void;
+    };
+    apiKey: {
+        getStatus: () => Promise<ApiKeyStatus>;
+        save: (key: string) => Promise<{ success: boolean; error?: string }>;
+        clear: () => Promise<boolean>;
+        validate: (key: string) => Promise<{ valid: boolean; error?: string }>;
+    };
+    journeys: {
+        list: () => Promise<JourneyInfo[]>;
+        start: (journeyId: string) => Promise<JourneyStartResult>;
+    };
+    llm: {
+        getConfig: () => Promise<LLMConfig>;
+        setConfig: (config: Partial<LLMConfig>) => Promise<void>;
+        testConnection: () => Promise<{ ok: boolean; error?: string }>;
+        getStatus: () => Promise<LLMStatus>;
+        listOllamaModels: (baseUrl?: string) => Promise<OllamaModel[]>;
     };
 }
 
@@ -584,6 +603,71 @@ export interface NarrativeSummary {
     patterns_to_watch: string[];
     recent_wins: string[];
     recent_struggles: string[];
+}
+
+// =============================================================================
+// API Key Management Types (Phase 5.1)
+// =============================================================================
+
+export interface ApiKeyStatus {
+    hasKey: boolean;
+    source: 'stored' | 'env' | 'none';
+    maskedKey: string | null;
+    encryptionAvailable: boolean;
+}
+
+// =============================================================================
+// LLM Backend Types (Phase 8)
+// =============================================================================
+
+export type BackendType = 'ollama' | 'claude';
+
+export interface LLMConfig {
+    backend: BackendType;
+    ollamaBaseUrl?: string;
+    ollamaModel?: string;
+    claudeApiKey?: string;
+    claudeModel?: string;
+}
+
+export interface LLMStatus {
+    backend: BackendType;
+    connected: boolean;
+    error?: string;
+    model?: string;
+}
+
+export interface OllamaModel {
+    name: string;
+    size: number;
+    modifiedAt: string;
+    digest: string;
+    details?: {
+        format: string;
+        family: string;
+        parameterSize: string;
+        quantizationLevel: string;
+    };
+}
+
+// =============================================================================
+// Journey Types (Phase 6)
+// =============================================================================
+
+export interface JourneyInfo {
+    id: string;
+    title: string;
+    description: string;
+    duration: string;
+    category: 'foundation' | 'understanding' | 'deeper';
+    axes: string[];
+    systemPrompt: string;
+}
+
+export interface JourneyStartResult {
+    conversationId: string;
+    journeyId: string;
+    title: string;
 }
 
 declare global {

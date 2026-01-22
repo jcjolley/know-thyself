@@ -14,6 +14,61 @@ interface ChatStreamDonePayload {
   title?: string;
 }
 
+// Define ApiKeyStatus inline to avoid import issues
+interface ApiKeyStatus {
+  hasKey: boolean;
+  source: "stored" | "env" | "none";
+  maskedKey: string | null;
+  encryptionAvailable: boolean;
+}
+
+interface JourneyInfo {
+  id: string;
+  title: string;
+  description: string;
+  duration: string;
+  category: "foundation" | "understanding" | "deeper";
+  axes: string[];
+  systemPrompt: string;
+}
+
+interface JourneyStartResult {
+  conversationId: string;
+  journeyId: string;
+  title: string;
+}
+
+// LLM Backend types
+type BackendType = "ollama" | "claude";
+
+interface LLMConfig {
+  backend: BackendType;
+  ollamaBaseUrl?: string;
+  ollamaModel?: string;
+  claudeApiKey?: string;
+  claudeModel?: string;
+}
+
+interface LLMStatus {
+  backend: BackendType;
+  connected: boolean;
+  error?: string;
+  model?: string;
+}
+
+interface OllamaModel {
+  name: string;
+  size: number;
+  modifiedAt: string;
+  digest: string;
+  details?: {
+    format: string;
+    family: string;
+    parameterSize: string;
+    quantizationLevel: string;
+  };
+}
+
 // Define the API interface inline to avoid import resolution issues in preload
 interface ElectronAPI {
   chat: {
@@ -68,6 +123,23 @@ interface ElectronAPI {
       callback: (progress: ReanalyzeProgress) => void,
     ) => void;
     removeReanalyzeProgressListener: () => void;
+  };
+  apiKey: {
+    getStatus: () => Promise<ApiKeyStatus>;
+    save: (key: string) => Promise<{ success: boolean; error?: string }>;
+    clear: () => Promise<boolean>;
+    validate: (key: string) => Promise<{ valid: boolean; error?: string }>;
+  };
+  journeys: {
+    list: () => Promise<JourneyInfo[]>;
+    start: (journeyId: string) => Promise<JourneyStartResult>;
+  };
+  llm: {
+    getConfig: () => Promise<LLMConfig>;
+    setConfig: (config: Partial<LLMConfig>) => Promise<void>;
+    testConnection: () => Promise<{ ok: boolean; error?: string }>;
+    getStatus: () => Promise<LLMStatus>;
+    listOllamaModels: (baseUrl?: string) => Promise<OllamaModel[]>;
   };
 }
 
@@ -144,6 +216,25 @@ const api: ElectronAPI = {
     removeReanalyzeProgressListener: () => {
       ipcRenderer.removeAllListeners("extraction:progress");
     },
+  },
+  apiKey: {
+    getStatus: () => ipcRenderer.invoke("apiKey:getStatus"),
+    save: (key: string) => ipcRenderer.invoke("apiKey:save", key),
+    clear: () => ipcRenderer.invoke("apiKey:clear"),
+    validate: (key: string) => ipcRenderer.invoke("apiKey:validate", key),
+  },
+  journeys: {
+    list: () => ipcRenderer.invoke("journeys:list"),
+    start: (journeyId: string) => ipcRenderer.invoke("journeys:start", journeyId),
+  },
+  llm: {
+    getConfig: () => ipcRenderer.invoke("llm:getConfig"),
+    setConfig: (config: Partial<LLMConfig>) =>
+      ipcRenderer.invoke("llm:setConfig", config),
+    testConnection: () => ipcRenderer.invoke("llm:testConnection"),
+    getStatus: () => ipcRenderer.invoke("llm:getStatus"),
+    listOllamaModels: (baseUrl?: string) =>
+      ipcRenderer.invoke("llm:listOllamaModels", baseUrl),
   },
 };
 

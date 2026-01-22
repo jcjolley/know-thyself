@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { generateResponse, streamResponse, isClaudeReady, buildResponsePrompts } from './claude.js';
+import { generateResponse, streamResponse, isClaudeReady, buildResponsePrompts, initClaude, generateJourneyOpening } from './claude.js';
 import { embed, isEmbeddingsReady } from './embeddings.js';
 import { getDb } from './db/sqlite.js';
 import { getOrCreateConversation, saveMessage, getRecentMessages, getMessagesWithPrompts, type MessageWithPrompt } from './db/messages.js';
@@ -20,7 +20,12 @@ import {
 import { runExtraction, reanalyzeConversation } from './extraction.js';
 import { assembleContext } from './context.js';
 import { getAllSignalsForAdmin, getEvidenceForDimension, getAllGoals, getFullProfileSummary } from './db/profile.js';
-import type { ProfileSummary, MaslowSignal, Value, Challenge, AppStatus, Message, Extraction, AdminProfileData, SignalEvidence, FullProfileSummary, Conversation } from '../shared/types.js';
+import { getApiKeyStatus, saveApiKey, clearApiKey, validateApiKeyFormat } from './api-key-storage.js';
+import { clearGuidedModeState, checkBaselineStatus, updateGuidedModeState, getGuidedModeState } from './guided-onboarding.js';
+import type { ProfileSummary, MaslowSignal, Value, Challenge, AppStatus, Message, Extraction, AdminProfileData, SignalEvidence, FullProfileSummary, Conversation, ApiKeyStatus, JourneyInfo, JourneyStartResult } from '../shared/types.js';
+import { getAllJourneys, getJourney } from './journeys.js';
+import { llmManager, saveLLMConfig, OllamaProvider } from './llm/index.js';
+import type { LLMConfig, LLMStatus, OllamaModel } from './llm/types.js';
 
 let initError: string | null = null;
 
@@ -87,9 +92,22 @@ export function registerIPCHandlers(): void {
         }
 
         // Run extraction in background (don't await)
-        runExtraction(userMessage.id, conversation.id).catch(err => {
-            console.error('Extraction failed:', err);
-        });
+        runExtraction(userMessage.id, conversation.id)
+            .then(() => {
+                // Check if baseline is now met after extraction
+                const baselineStatus = checkBaselineStatus();
+                const state = getGuidedModeState(conversation.id);
+                if (baselineStatus.baselineComplete && state.isActive) {
+                    updateGuidedModeState(conversation.id, {
+                        isActive: false,
+                        deactivationReason: 'baseline_met',
+                    });
+                    console.log('[guided] Baseline met after extraction, deactivating guided mode');
+                }
+            })
+            .catch(err => {
+                console.error('Extraction failed:', err);
+            });
 
         return { response, conversationId: conversation.id, title: newTitle };
     });
@@ -142,9 +160,22 @@ export function registerIPCHandlers(): void {
             }
 
             // Run extraction in background
-            runExtraction(userMessage.id, conversation.id).catch(err => {
-                console.error('Extraction failed:', err);
-            });
+            runExtraction(userMessage.id, conversation.id)
+                .then(() => {
+                    // Check if baseline is now met after extraction
+                    const baselineStatus = checkBaselineStatus();
+                    const state = getGuidedModeState(conversation.id);
+                    if (baselineStatus.baselineComplete && state.isActive) {
+                        updateGuidedModeState(conversation.id, {
+                            isActive: false,
+                            deactivationReason: 'baseline_met',
+                        });
+                        console.log('[guided] Baseline met after extraction, deactivating guided mode');
+                    }
+                })
+                .catch(err => {
+                    console.error('Extraction failed:', err);
+                });
 
             if (!event.sender.isDestroyed()) {
                 event.reply('chat:done', { conversationId: conversation.id, title: newTitle });
@@ -190,6 +221,8 @@ export function registerIPCHandlers(): void {
     });
 
     ipcMain.handle('conversations:delete', async (_event, id: string): Promise<boolean> => {
+        // Clear guided mode state for this conversation
+        clearGuidedModeState(id);
         return deleteConversation(id);
     });
 
@@ -236,6 +269,134 @@ export function registerIPCHandlers(): void {
 
     ipcMain.handle('profile:getSummary', async (): Promise<FullProfileSummary> => {
         return getFullProfileSummary();
+    });
+
+    // ==========================================================================
+    // API Key Management
+    // ==========================================================================
+
+    ipcMain.handle('apiKey:getStatus', async (): Promise<ApiKeyStatus> => {
+        return getApiKeyStatus();
+    });
+
+    ipcMain.handle('apiKey:save', async (_event, key: string): Promise<{ success: boolean; error?: string }> => {
+        const result = saveApiKey(key);
+        if (result.success) {
+            // Re-initialize Claude with new key
+            try {
+                initClaude();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                return { success: false, error: `Key saved but Claude init failed: ${message}` };
+            }
+        }
+        return result;
+    });
+
+    ipcMain.handle('apiKey:clear', async (): Promise<boolean> => {
+        return clearApiKey();
+    });
+
+    ipcMain.handle('apiKey:validate', async (_event, key: string): Promise<{ valid: boolean; error?: string }> => {
+        return validateApiKeyFormat(key);
+    });
+
+    // ==========================================================================
+    // LLM Backend Handlers
+    // ==========================================================================
+
+    ipcMain.handle('llm:getConfig', async (): Promise<LLMConfig> => {
+        return llmManager.getConfig();
+    });
+
+    ipcMain.handle('llm:setConfig', async (_event, config: Partial<LLMConfig>): Promise<void> => {
+        // Save to storage (excluding sensitive data that's stored separately)
+        await saveLLMConfig({
+            backend: config.backend,
+            ollamaBaseUrl: config.ollamaBaseUrl,
+            ollamaModel: config.ollamaModel,
+        });
+
+        // Update the manager (which recreates the provider if needed)
+        await llmManager.updateConfig(config);
+    });
+
+    ipcMain.handle('llm:testConnection', async (): Promise<{ ok: boolean; error?: string }> => {
+        try {
+            const provider = llmManager.getProvider();
+            return await provider.testConnection();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            return { ok: false, error: message };
+        }
+    });
+
+    ipcMain.handle('llm:getStatus', async (): Promise<LLMStatus> => {
+        return await llmManager.getStatus();
+    });
+
+    ipcMain.handle('llm:listOllamaModels', async (_event, baseUrl?: string): Promise<OllamaModel[]> => {
+        const url = baseUrl || llmManager.getConfig().ollamaBaseUrl || 'http://localhost:11434';
+        try {
+            return await OllamaProvider.listModels(url);
+        } catch (error) {
+            console.error('Failed to list Ollama models:', error);
+            return [];
+        }
+    });
+
+    // ==========================================================================
+    // Journey Handlers
+    // ==========================================================================
+
+    ipcMain.handle('journeys:list', async (): Promise<JourneyInfo[]> => {
+        return getAllJourneys();
+    });
+
+    ipcMain.handle('journeys:start', async (_event, journeyId: string): Promise<JourneyStartResult> => {
+        const journey = getJourney(journeyId);
+        if (!journey) {
+            throw new Error(`Journey not found: ${journeyId}`);
+        }
+
+        // Create a new conversation with this journey
+        const conversation = createConversation(journey.title, journeyId);
+
+        // Generate opening message from Claude
+        try {
+            // Get brief profile summary for the opening
+            const db = getDb();
+            const parts: string[] = [];
+
+            const values = db.prepare(`
+                SELECT name FROM user_values ORDER BY confidence DESC LIMIT 3
+            `).all() as { name: string }[];
+            const challenges = db.prepare(`
+                SELECT description FROM challenges WHERE status = 'active' LIMIT 2
+            `).all() as { description: string }[];
+
+            if (values.length > 0) {
+                parts.push(`Values: ${values.map(v => v.name).join(', ')}`);
+            }
+            if (challenges.length > 0) {
+                parts.push(`Current challenges: ${challenges.map(c => c.description.slice(0, 50)).join('; ')}`);
+            }
+            const profileSummary = parts.join('\n') || 'New user, minimal profile data.';
+
+            // Generate and save the opening message
+            const openingMessage = await generateJourneyOpening(journey, profileSummary);
+            await saveMessage(conversation.id, 'assistant', openingMessage);
+            console.log(`[journeys] Generated opening message for journey: ${journeyId}`);
+        } catch (err) {
+            console.error('[journeys] Failed to generate opening message:', err);
+            // Continue without opening message - user can still use the conversation
+        }
+
+        return {
+            conversationId: conversation.id,
+            journeyId: journeyId,
+            title: journey.title,
+        };
     });
 
     // ==========================================================================

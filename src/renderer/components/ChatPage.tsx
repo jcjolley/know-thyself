@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ChatStreamDonePayload } from '../../shared/types';
+import { MarkdownRenderer } from './MarkdownRenderer';
+import { BackendIndicator } from './BackendIndicator';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface AppStatus {
     embeddingsReady: boolean;
@@ -20,22 +23,23 @@ interface ChatPageProps {
     onConversationUpdated?: (conversationId: string, title?: string) => void;
 }
 
-// CSS Variables matching the Profile page
-const cssVars = {
-    '--chat-bg': '#faf8f5',
-    '--chat-card': '#ffffff',
-    '--chat-text': '#3d3630',
-    '--chat-text-muted': '#8b8178',
-    '--chat-accent': '#c4956a',
-    '--chat-accent-soft': 'rgba(196, 149, 106, 0.12)',
-    '--chat-border': 'rgba(139, 129, 120, 0.15)',
-    '--chat-shadow': '0 2px 8px rgba(61, 54, 48, 0.06)',
-    '--chat-shadow-hover': '0 4px 16px rgba(61, 54, 48, 0.1)',
-    '--chat-success': '#7d9e7a',
-    '--chat-error': '#c45a4a',
-} as React.CSSProperties;
-
 export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProps) {
+    const { theme, isDark } = useTheme();
+
+    // CSS Variables derived from theme
+    const cssVars = {
+        '--chat-bg': theme.colors.background,
+        '--chat-card': theme.colors.surface,
+        '--chat-text': theme.colors.textPrimary,
+        '--chat-text-muted': theme.colors.textSecondary,
+        '--chat-accent': theme.colors.accent,
+        '--chat-accent-soft': theme.colors.accentSoft,
+        '--chat-border': theme.colors.border,
+        '--chat-shadow': `0 2px 8px ${theme.colors.shadow}`,
+        '--chat-shadow-hover': `0 4px 16px ${theme.colors.shadow}`,
+        '--chat-success': theme.colors.success,
+        '--chat-error': theme.colors.error,
+    } as React.CSSProperties;
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<Message[]>([]);
     const [error, setError] = useState<string | null>(null);
@@ -206,49 +210,48 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
         }}>
             {/* Header */}
             <header style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
                 marginBottom: 20,
-                paddingBottom: 20,
+                paddingBottom: 16,
                 borderBottom: '1px solid var(--chat-border)',
                 animation: 'fadeIn 0.5s ease-out',
             }}>
-                <h1 style={{
-                    fontFamily: 'Georgia, "Times New Roman", serif',
-                    fontSize: 28,
-                    fontWeight: 400,
-                    color: 'var(--chat-text)',
-                    margin: 0,
-                    marginBottom: 6,
-                    letterSpacing: '-0.01em',
-                }}>
-                    Know Thyself
-                </h1>
-                <p style={{
-                    color: 'var(--chat-text-muted)',
-                    margin: 0,
-                    fontSize: 14,
-                    letterSpacing: '0.02em',
-                }}>
-                    AI-guided self-reflection
-                </p>
-            </header>
-
-            {/* Status Display - Subtle */}
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 16,
-                marginBottom: 16,
-                fontSize: 12,
-                color: 'var(--chat-text-muted)',
-                animation: 'fadeIn 0.5s ease-out 0.1s both',
-            }}>
-                <span style={{ fontWeight: 500 }}>Status:</span>
-                <div style={{ display: 'flex', gap: 12 }}>
-                    <StatusIndicator ready={status?.databaseReady} label="DB" />
-                    <StatusIndicator ready={status?.claudeReady} label="Claude" />
-                    <StatusIndicator ready={status?.embeddingsReady} label="Embeddings" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <h1 style={{
+                        fontFamily: 'Georgia, "Times New Roman", serif',
+                        fontSize: 20,
+                        fontWeight: 400,
+                        fontStyle: 'italic',
+                        color: 'var(--chat-text-muted)',
+                        margin: 0,
+                        letterSpacing: '0.02em',
+                    }}>
+                        The Mirror
+                    </h1>
+                    <BackendIndicator />
                 </div>
-            </div>
+
+                {/* Status indicators - only show if there's a problem */}
+                {(status && (!status.databaseReady || !status.claudeReady || !status.embeddingsReady)) && (
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        fontSize: 11,
+                        color: 'var(--chat-text-muted)',
+                        padding: '6px 12px',
+                        background: 'rgba(196, 90, 74, 0.06)',
+                        borderRadius: 6,
+                        border: '1px solid rgba(196, 90, 74, 0.15)',
+                    }}>
+                        {!status.databaseReady && <StatusIndicator ready={false} label="DB" />}
+                        {!status.claudeReady && <StatusIndicator ready={false} label="Claude" />}
+                        {!status.embeddingsReady && <StatusIndicator ready={false} label="Embeddings" />}
+                    </div>
+                )}
+            </header>
 
             {/* Error Display */}
             {error && (
@@ -321,9 +324,9 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                         fontSize: 15,
                         fontFamily: 'Georgia, "Times New Roman", serif',
                         lineHeight: 1.7,
-                        color: 'var(--chat-text)',
-                        background: '#faf8f5',
-                        border: '1px solid var(--chat-border)',
+                        color: theme.colors.textPrimary,
+                        background: theme.colors.background,
+                        border: `1px solid ${theme.colors.border}`,
                         borderRadius: 12,
                         outline: 'none',
                         resize: 'none',
@@ -353,16 +356,18 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                     }}>
                         Press <kbd style={{
                             padding: '2px 6px',
-                            background: '#f5f3f0',
+                            background: isDark ? theme.colors.surface : '#f5f3f0',
                             borderRadius: 4,
                             fontSize: 11,
                             fontFamily: 'system-ui, sans-serif',
+                            border: isDark ? `1px solid ${theme.colors.border}` : 'none',
                         }}>Enter</kbd> to send, <kbd style={{
                             padding: '2px 6px',
-                            background: '#f5f3f0',
+                            background: isDark ? theme.colors.surface : '#f5f3f0',
                             borderRadius: 4,
                             fontSize: 11,
                             fontFamily: 'system-ui, sans-serif',
+                            border: isDark ? `1px solid ${theme.colors.border}` : 'none',
                         }}>Shift+Enter</kbd> for new line
                     </span>
                     <button
@@ -373,12 +378,14 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                             fontSize: 14,
                             fontWeight: 500,
                             background: (isLoading || !input.trim() || !status?.claudeReady)
-                                ? '#e8e4df'
-                                : 'var(--chat-accent)',
+                                ? (isDark ? theme.colors.surface : '#e8e4df')
+                                : theme.colors.accent,
                             color: (isLoading || !input.trim() || !status?.claudeReady)
-                                ? 'var(--chat-text-muted)'
+                                ? theme.colors.textMuted
                                 : '#ffffff',
-                            border: 'none',
+                            border: (isLoading || !input.trim() || !status?.claudeReady) && isDark
+                                ? `1px solid ${theme.colors.border}`
+                                : 'none',
                             borderRadius: 8,
                             cursor: (isLoading || !input.trim() || !status?.claudeReady)
                                 ? 'not-allowed'
@@ -388,13 +395,13 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                         }}
                         onMouseEnter={(e) => {
                             if (!isLoading && input.trim() && status?.claudeReady) {
-                                e.currentTarget.style.background = '#b8896a';
+                                e.currentTarget.style.background = isDark ? '#c4956a' : '#b8896a';
                                 e.currentTarget.style.transform = 'translateY(-1px)';
                             }
                         }}
                         onMouseLeave={(e) => {
                             if (!isLoading && input.trim() && status?.claudeReady) {
-                                e.currentTarget.style.background = 'var(--chat-accent)';
+                                e.currentTarget.style.background = theme.colors.accent;
                                 e.currentTarget.style.transform = 'translateY(0)';
                             }
                         }}
@@ -539,27 +546,33 @@ function MessageBubble({ message, timestamp, index, isStreaming }: { message: Me
                 boxShadow: isUser ? 'none' : 'var(--chat-shadow)',
                 border: isUser ? 'none' : '1px solid var(--chat-border)',
             }}>
-                <p style={{
-                    fontFamily: 'Georgia, "Times New Roman", serif',
-                    fontSize: 15,
-                    lineHeight: 1.75,
-                    color: 'var(--chat-text)',
-                    margin: 0,
-                    whiteSpace: 'pre-wrap',
-                }}>
-                    {message.content}
-                    {isStreaming && (
-                        <span style={{
-                            display: 'inline-block',
-                            width: 2,
-                            height: '1em',
-                            marginLeft: 2,
-                            background: 'var(--chat-accent)',
-                            animation: 'blink 1s ease-in-out infinite',
-                            verticalAlign: 'text-bottom',
-                        }} />
-                    )}
-                </p>
+                {isUser ? (
+                    <p style={{
+                        fontFamily: 'Georgia, "Times New Roman", serif',
+                        fontSize: 15,
+                        lineHeight: 1.75,
+                        color: 'var(--chat-text)',
+                        margin: 0,
+                        whiteSpace: 'pre-wrap',
+                    }}>
+                        {message.content}
+                    </p>
+                ) : (
+                    <>
+                        <MarkdownRenderer content={message.content} />
+                        {isStreaming && (
+                            <span style={{
+                                display: 'inline-block',
+                                width: 2,
+                                height: '1em',
+                                marginLeft: 2,
+                                background: 'var(--chat-accent)',
+                                animation: 'blink 1s ease-in-out infinite',
+                                verticalAlign: 'text-bottom',
+                            }} />
+                        )}
+                    </>
+                )}
             </div>
         </div>
     );
