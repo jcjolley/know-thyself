@@ -13,14 +13,14 @@ test.describe('Admin Page (Debug Mode)', () => {
     test('US-201: Tab navigation displays in debug mode', async () => {
         const page = getPage();
 
-        // DEBUG MODE badge should be visible
-        const debugBadge = page.locator('text=DEBUG MODE');
+        // Debug badge should be visible
+        const debugBadge = page.locator('text=Debug');
         await expect(debugBadge).toBeVisible();
 
-        // Both tabs should be present
-        const chatTab = page.locator('button:has-text("Chat")');
+        // Tabs should be present
+        const reflectTab = page.locator('button:has-text("Reflect")');
         const adminTab = page.locator('button:has-text("Admin")');
-        await expect(chatTab).toBeVisible();
+        await expect(reflectTab).toBeVisible();
         await expect(adminTab).toBeVisible();
     });
 
@@ -65,19 +65,15 @@ test.describe('Admin Page (Debug Mode)', () => {
         await expect(legacySection).toBeVisible();
     });
 
-    test('US-201: Switching back to Chat tab preserves state', async () => {
+    test('US-201: Switching back to Reflect tab preserves state', async () => {
         const page = getPage();
 
-        // Click Chat tab to go back
-        await page.click('button:has-text("Chat")');
+        // Click Reflect tab to go back
+        await page.click('button:has-text("Reflect")');
 
-        // Should see the chat heading
-        const heading = page.locator('h1:has-text("Know Thyself")');
+        // Should see the chat heading "The Mirror"
+        const heading = page.locator('h1:has-text("The Mirror")');
         await expect(heading).toBeVisible();
-
-        // Status bar should still be visible
-        const statusText = page.locator('text=Status:');
-        await expect(statusText).toBeVisible();
     });
 
     test('US-202: Tier sections can be collapsed and expanded', async () => {

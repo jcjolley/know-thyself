@@ -10,10 +10,10 @@ test.describe('US-001: Application Launch', () => {
         await closeApp();
     });
 
-    test('window displays with "Know Thyself" heading', async () => {
+    test('window displays with "The Mirror" heading on chat page', async () => {
         const page = getPage();
         const heading = await page.locator('h1');
-        await expect(heading).toHaveText('Know Thyself');
+        await expect(heading).toHaveText('The Mirror');
     });
 
     test('React UI renders successfully', async () => {
