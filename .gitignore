@@ -34,3 +34,4 @@ npm-debug.log*
 test-results/
 playwright-report/
 coverage/
+test-data/
