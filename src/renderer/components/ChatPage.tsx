@@ -912,16 +912,7 @@ function MessageBubble({
                 border: isUser ? 'none' : '1px solid var(--chat-border)',
             }}>
                 {isUser ? (
-                    <p style={{
-                        fontFamily: 'Georgia, "Times New Roman", serif',
-                        fontSize: 15,
-                        lineHeight: 1.75,
-                        color: 'var(--chat-text)',
-                        margin: 0,
-                        whiteSpace: 'pre-wrap',
-                    }}>
-                        {message.content}
-                    </p>
+                    <MarkdownRenderer content={message.content} />
                 ) : (
                     <>
                         {/* Show thinking indicator when model is in thinking mode */}
