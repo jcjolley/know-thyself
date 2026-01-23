@@ -151,7 +151,7 @@ export class OllamaProvider implements LLMProvider {
       messages: ollamaMessages,
       stream: false,
       options: {
-        num_predict: options?.maxTokens ?? 4096,
+        num_predict: options?.maxTokens ?? 8192,
         temperature: options?.temperature ?? 0.7,
         repeat_penalty: 1.1,
         repeat_last_n: 64,
@@ -186,7 +186,7 @@ export class OllamaProvider implements LLMProvider {
       messages: ollamaMessages,
       stream: true,
       options: {
-        num_predict: options?.maxTokens ?? 4096,
+        num_predict: options?.maxTokens ?? 8192,
         temperature: options?.temperature ?? 0.7,
         repeat_penalty: 1.1,
         repeat_last_n: 64,
