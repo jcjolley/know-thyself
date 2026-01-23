@@ -68,7 +68,7 @@ async function planContext(
             const rawResponse = await provider.generateText(
                 [{ role: 'user', content: prompt }],
                 undefined,
-                { maxTokens: 500 }
+                { maxTokens: 1500 }  // Increased for local models that need more tokens
             );
 
             // Strip markdown fences if present
@@ -77,6 +77,18 @@ async function planContext(
                 .replace(/^```\s*/i, '')
                 .replace(/\s*```$/i, '')
                 .trim();
+
+            // Try to extract JSON object if response has extra content
+            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                jsonStr = jsonMatch[0];
+            }
+        }
+
+        // Validate we have something to parse
+        if (!jsonStr || jsonStr.length < 10) {
+            console.error('[context] Empty or too short response from LLM:', jsonStr);
+            return null;
         }
 
         const plan = JSON.parse(jsonStr) as ContextPlanResult;
