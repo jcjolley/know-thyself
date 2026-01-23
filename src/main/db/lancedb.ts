@@ -1,6 +1,5 @@
-import * as lancedb from 'vectordb';
-import { app } from 'electron';
-import path from 'path';
+import * as lancedb from '@lancedb/lancedb';
+import { paths } from '../paths.js';
 
 // Import types using relative path (not alias) for main process compatibility
 import type { MessageEmbedding, InsightEmbedding } from '../../shared/types.js';
@@ -13,7 +12,7 @@ let insightsTable: lancedb.Table | null = null;
 export async function initLanceDB(): Promise<void> {
     if (connection) return;
 
-    const dbPath = path.join(app.getPath('userData'), 'lancedb');
+    const dbPath = paths.lancedb;
     console.log(`Initializing LanceDB at: ${dbPath}`);
 
     connection = await lancedb.connect(dbPath);
@@ -38,7 +37,7 @@ export async function initLanceDB(): Promise<void> {
         messagesTable = await connection.openTable('messages');
         // Check if existing table has correct vector dimensions
         try {
-            const schema = await messagesTable.schema;
+            const schema = await messagesTable.schema();
             const vectorField = schema.fields.find((f: { name: string }) => f.name === 'vector');
             // FixedSizeList type has listSize property indicating dimensions
             const existingDims = vectorField?.type?.listSize;
@@ -79,7 +78,7 @@ export async function initLanceDB(): Promise<void> {
         insightsTable = await connection.openTable('insights');
         // Check if existing table has correct vector dimensions
         try {
-            const schema = await insightsTable.schema;
+            const schema = await insightsTable.schema();
             const vectorField = schema.fields.find((f: { name: string }) => f.name === 'vector');
             const existingDims = vectorField?.type?.listSize;
             if (existingDims && existingDims !== EMBEDDING_DIMENSIONS) {
@@ -117,7 +116,7 @@ export function getInsightsTable(): lancedb.Table {
 
 export async function addMessageEmbedding(embedding: MessageEmbedding): Promise<void> {
     const table = getMessagesTable();
-    await table.add([embedding]);
+    await table.add([embedding as unknown as Record<string, unknown>]);
 }
 
 export async function searchSimilarMessages(
@@ -130,13 +129,13 @@ export async function searchSimilarMessages(
     if (count === 0) {
         return [];
     }
-    const results = await table.search(vector).limit(limit).execute();
+    const results = await table.vectorSearch(vector).limit(limit).toArray();
     return results as unknown as MessageEmbedding[];
 }
 
 export async function addInsightEmbedding(embedding: InsightEmbedding): Promise<void> {
     const table = getInsightsTable();
-    await table.add([embedding]);
+    await table.add([embedding as unknown as Record<string, unknown>]);
 }
 
 export async function searchSimilarInsights(
@@ -149,6 +148,30 @@ export async function searchSimilarInsights(
     if (count === 0) {
         return [];
     }
-    const results = await table.search(vector).limit(limit).execute();
+    const results = await table.vectorSearch(vector).limit(limit).toArray();
     return results as unknown as InsightEmbedding[];
+}
+
+/**
+ * Delete embeddings for specific message IDs.
+ * Best-effort: logs errors but doesn't throw.
+ */
+export async function deleteMessageEmbeddings(messageIds: string[]): Promise<void> {
+    if (messageIds.length === 0) return;
+
+    try {
+        const table = getMessagesTable();
+
+        // Delete each message embedding by ID
+        // LanceDB uses SQL-like filter syntax
+        for (const id of messageIds) {
+            try {
+                await table.delete(`id = '${id}'`);
+            } catch (err) {
+                console.error(`Failed to delete embedding for message ${id}:`, err);
+            }
+        }
+    } catch (err) {
+        console.error('Failed to delete message embeddings:', err);
+    }
 }

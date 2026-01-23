@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { ChatStreamDonePayload } from '../../shared/types';
+import type { ChatStreamDonePayload, RegenerateResult } from '../../shared/types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { BackendIndicator } from './BackendIndicator';
+import { ThinkingIndicator } from './ThinkingIndicator';
+import { MessageActions } from './MessageActions';
+import { ResetConfirmDialog } from './ResetConfirmDialog';
+import { MessageActionSheet } from './MessageActionSheet';
 import { useTheme } from '../contexts/ThemeContext';
+import { useApi } from '../contexts/ApiContext';
 
 interface AppStatus {
     embeddingsReady: boolean;
@@ -23,8 +28,14 @@ interface ChatPageProps {
     onConversationUpdated?: (conversationId: string, title?: string) => void;
 }
 
+// Detect touch device
+function isTouchDevice(): boolean {
+    return window.matchMedia('(pointer: coarse)').matches;
+}
+
 export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProps) {
     const { theme, isDark } = useTheme();
+    const api = useApi();
 
     // CSS Variables derived from theme
     const cssVars = {
@@ -44,9 +55,22 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
     const [messages, setMessages] = useState<Message[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [isThinking, setIsThinking] = useState(false);
     const [status, setStatus] = useState<AppStatus | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    // Message action states
+    const [expandedActionId, setExpandedActionId] = useState<string | null>(null);
+    const [hoveredMessageId, setHoveredMessageId] = useState<string | null>(null);
+    const [showResetDialog, setShowResetDialog] = useState(false);
+    const [resetTargetMessage, setResetTargetMessage] = useState<Message | null>(null);
+    const [resetDeleteCount, setResetDeleteCount] = useState(0);
+    const [isResetting, setIsResetting] = useState(false);
+    const [actionSheetOpen, setActionSheetOpen] = useState(false);
+    const [actionSheetMessage, setActionSheetMessage] = useState<Message | null>(null);
+    const [actionSheetDeleteCount, setActionSheetDeleteCount] = useState(0);
+    const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Auto-resize textarea
     const adjustTextareaHeight = useCallback(() => {
@@ -77,20 +101,20 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                 return;
             }
             try {
-                const history = await window.api.messages.history(conversationId) as Message[];
+                const history = await api.messages.history(conversationId) as Message[];
                 setMessages(history);
             } catch (err) {
                 console.error('Failed to load history:', err);
             }
         };
         loadHistory();
-    }, [conversationId]);
+    }, [api, conversationId]);
 
     // Poll for app status
     useEffect(() => {
         const checkStatus = async () => {
             try {
-                const s = await window.api.app.getStatus() as AppStatus;
+                const s = await api.app.getStatus() as AppStatus;
                 setStatus(s);
                 if (s.error && !error) {
                     setError(s.error);
@@ -103,7 +127,16 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
         checkStatus();
         const interval = setInterval(checkStatus, 2000);
         return () => clearInterval(interval);
-    }, [error]);
+    }, [api, error]);
+
+    // Close expanded actions when clicking outside
+    useEffect(() => {
+        const handleClickOutside = () => {
+            setExpandedActionId(null);
+        };
+        document.addEventListener('click', handleClickOutside);
+        return () => document.removeEventListener('click', handleClickOutside);
+    }, []);
 
     const handleSend = useCallback(async () => {
         if (!input.trim() || isLoading) return;
@@ -134,9 +167,16 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
         setMessages(prev => [...prev, tempUserMessage, tempAssistantMessage]);
 
         // Set up streaming listeners
-        window.api.chat.removeAllListeners();
+        api.chat.removeAllListeners();
 
-        window.api.chat.onChunk((chunk: string) => {
+        api.chat.onThinking(() => {
+            // Model has entered thinking/reasoning mode
+            setIsThinking(true);
+        });
+
+        api.chat.onChunk((chunk: string) => {
+            // First chunk of actual content means thinking is done
+            setIsThinking(false);
             // Stream directly into the assistant message
             setMessages(prev => {
                 const updated = [...prev];
@@ -151,8 +191,9 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
             });
         });
 
-        window.api.chat.onDone((payload?: ChatStreamDonePayload) => {
+        api.chat.onDone((payload?: ChatStreamDonePayload) => {
             setIsLoading(false);
+            setIsThinking(false);
             // Don't reload history - we already have the content streamed in.
             // This avoids the flash caused by replacing temp IDs with database IDs.
             // History will be properly loaded when navigating or on next refresh.
@@ -164,9 +205,10 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
             textareaRef.current?.focus();
         });
 
-        window.api.chat.onError((err: string) => {
+        api.chat.onError((err: string) => {
             setError(`Error: ${err}`);
             setIsLoading(false);
+            setIsThinking(false);
             // Remove optimistic messages on error
             setMessages(prev => prev.filter(m =>
                 m.id !== tempUserMessage.id && m.id !== tempAssistantMessage.id
@@ -174,8 +216,8 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
         });
 
         // Start streaming with conversationId
-        window.api.chat.stream(userMessage, conversationId || undefined);
-    }, [input, isLoading, conversationId, onConversationUpdated]);
+        api.chat.stream(userMessage, conversationId || undefined);
+    }, [api, input, isLoading, conversationId, onConversationUpdated]);
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -196,6 +238,184 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
         if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
 
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    };
+
+    // Handle reset after - show confirmation dialog
+    const handleResetAfterClick = useCallback(async (message: Message) => {
+        if (!conversationId) return;
+
+        setExpandedActionId(null);
+        setResetTargetMessage(message);
+
+        // Get count of messages to be deleted
+        try {
+            const count = await api.conversations.getMessagesAfterCount(conversationId, message.id);
+            setResetDeleteCount(count);
+            setShowResetDialog(true);
+        } catch (err) {
+            console.error('Failed to get message count:', err);
+            setError('Failed to get message count');
+        }
+    }, [api, conversationId]);
+
+    // Confirm reset
+    const handleResetConfirm = useCallback(async () => {
+        if (!conversationId || !resetTargetMessage) return;
+
+        setIsResetting(true);
+
+        try {
+            const result = await api.conversations.resetAfter(conversationId, resetTargetMessage.id);
+
+            if (result.success) {
+                // Reload messages from server
+                const history = await api.messages.history(conversationId) as Message[];
+                setMessages(history);
+                setShowResetDialog(false);
+                setResetTargetMessage(null);
+            } else {
+                setError(result.error || 'Failed to reset conversation');
+            }
+        } catch (err) {
+            console.error('Failed to reset:', err);
+            setError('Failed to reset conversation');
+        } finally {
+            setIsResetting(false);
+        }
+    }, [api, conversationId, resetTargetMessage]);
+
+    // Handle regenerate
+    const handleRegenerate = useCallback(async (message: Message) => {
+        if (!conversationId || isLoading) return;
+
+        setExpandedActionId(null);
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            // Call regenerate API
+            const result = await api.messages.regenerate(message.id) as RegenerateResult;
+
+            if (result.type === 'error') {
+                setError(result.error);
+                setIsLoading(false);
+                return;
+            }
+
+            // Remove the regenerated message from UI
+            setMessages(prev => prev.filter(m => m.id !== message.id));
+
+            // Add placeholder for new response
+            const tempAssistantMessage: Message = {
+                id: `temp-assistant-${Date.now()}`,
+                role: 'assistant',
+                content: '',
+                created_at: new Date().toISOString(),
+            };
+            setMessages(prev => [...prev, tempAssistantMessage]);
+
+            // Set up streaming listeners
+            api.chat.removeAllListeners();
+
+            api.chat.onThinking(() => {
+                setIsThinking(true);
+            });
+
+            api.chat.onChunk((chunk: string) => {
+                setIsThinking(false);
+                setMessages(prev => {
+                    const updated = [...prev];
+                    const lastMsg = updated[updated.length - 1];
+                    if (lastMsg && lastMsg.role === 'assistant') {
+                        updated[updated.length - 1] = {
+                            ...lastMsg,
+                            content: lastMsg.content + chunk,
+                        };
+                    }
+                    return updated;
+                });
+            });
+
+            api.chat.onDone((payload?: ChatStreamDonePayload) => {
+                setIsLoading(false);
+                setIsThinking(false);
+                if (payload?.conversationId && onConversationUpdated) {
+                    onConversationUpdated(payload.conversationId, payload.title);
+                }
+            });
+
+            api.chat.onError((err: string) => {
+                setError(`Error: ${err}`);
+                setIsLoading(false);
+                setIsThinking(false);
+            });
+
+            // Start regeneration based on type
+            if (result.type === 'chat') {
+                // Re-send the user message
+                api.chat.stream(result.userMessage, result.conversationId);
+            } else if (result.type === 'journey') {
+                // For journey opening, use the journey start endpoint
+                // The server already deleted the old message, so we just need to reload
+                const history = await api.messages.history(conversationId) as Message[];
+                setMessages(history);
+                setIsLoading(false);
+            }
+        } catch (err) {
+            console.error('Failed to regenerate:', err);
+            setError('Failed to regenerate response');
+            setIsLoading(false);
+        }
+    }, [api, conversationId, isLoading, onConversationUpdated]);
+
+    // Long press handlers for mobile
+    const handleTouchStart = useCallback((message: Message, _index: number) => {
+        if (!isTouchDevice()) return;
+
+        longPressTimerRef.current = setTimeout(async () => {
+            // Haptic feedback
+            if (navigator.vibrate) {
+                navigator.vibrate(10);
+            }
+
+            // Get delete count for action sheet
+            if (conversationId) {
+                try {
+                    const count = await api.conversations.getMessagesAfterCount(conversationId, message.id);
+                    setActionSheetDeleteCount(count);
+                } catch {
+                    setActionSheetDeleteCount(0);
+                }
+            }
+
+            setActionSheetMessage(message);
+            setActionSheetOpen(true);
+        }, 500);
+    }, [api, conversationId]);
+
+    const handleTouchEnd = useCallback(() => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    }, []);
+
+    const handleTouchMove = useCallback(() => {
+        // Cancel long press if user moves finger
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    }, []);
+
+    // Determine if a message can be reset (not last message, not streaming)
+    const canResetMessage = (index: number) => {
+        return !isLoading && index < messages.length - 1;
+    };
+
+    // Determine if a message can be regenerated (assistant, not streaming)
+    const canRegenerateMessage = (message: Message) => {
+        return !isLoading && message.role === 'assistant';
     };
 
     return (
@@ -293,7 +513,20 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                         message={msg}
                         timestamp={formatTime(msg.created_at)}
                         index={index}
-                        isStreaming={isLoading && msg.id.startsWith('temp-assistant')}
+                        isStreaming={isLoading && index === messages.length - 1 && msg.role === 'assistant'}
+                        isThinking={isThinking && index === messages.length - 1 && msg.role === 'assistant'}
+                        isHovered={hoveredMessageId === msg.id}
+                        onMouseEnter={() => setHoveredMessageId(msg.id)}
+                        onMouseLeave={() => setHoveredMessageId(null)}
+                        canReset={canResetMessage(index)}
+                        canRegenerate={canRegenerateMessage(msg)}
+                        expandedActionId={expandedActionId}
+                        onToggleActions={() => setExpandedActionId(expandedActionId === msg.id ? null : msg.id)}
+                        onResetAfter={() => handleResetAfterClick(msg)}
+                        onRegenerate={() => handleRegenerate(msg)}
+                        onTouchStart={() => handleTouchStart(msg, index)}
+                        onTouchEnd={handleTouchEnd}
+                        onTouchMove={handleTouchMove}
                     />
                 ))}
 
@@ -411,6 +644,36 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                 </div>
             </div>
 
+            {/* Reset Confirmation Dialog */}
+            {showResetDialog && resetTargetMessage && (
+                <ResetConfirmDialog
+                    messagePreview={resetTargetMessage.content}
+                    deleteCount={resetDeleteCount}
+                    onConfirm={handleResetConfirm}
+                    onCancel={() => {
+                        setShowResetDialog(false);
+                        setResetTargetMessage(null);
+                    }}
+                    isLoading={isResetting}
+                />
+            )}
+
+            {/* Mobile Action Sheet */}
+            {actionSheetMessage && (
+                <MessageActionSheet
+                    isOpen={actionSheetOpen}
+                    canReset={canResetMessage(messages.findIndex(m => m.id === actionSheetMessage.id))}
+                    canRegenerate={canRegenerateMessage(actionSheetMessage)}
+                    deleteCount={actionSheetDeleteCount}
+                    onClose={() => {
+                        setActionSheetOpen(false);
+                        setActionSheetMessage(null);
+                    }}
+                    onResetAfter={() => handleResetAfterClick(actionSheetMessage)}
+                    onRegenerate={() => handleRegenerate(actionSheetMessage)}
+                />
+            )}
+
             {/* Keyframe animations and scrollbar styling */}
             <style>{`
                 @keyframes fadeIn {
@@ -434,6 +697,10 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                 @keyframes blink {
                     0%, 100% { opacity: 1; }
                     50% { opacity: 0; }
+                }
+                @keyframes shimmer {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
                 }
 
                 /* Custom scrollbar styling */
@@ -507,14 +774,60 @@ function StatusIndicator({ ready, label }: { ready?: boolean; label: string }) {
 }
 
 // Message Bubble Component
-function MessageBubble({ message, timestamp, index, isStreaming }: { message: Message; timestamp: string; index: number; isStreaming?: boolean }) {
+interface MessageBubbleProps {
+    message: Message;
+    timestamp: string;
+    index: number;
+    isStreaming?: boolean;
+    isThinking?: boolean;
+    isHovered?: boolean;
+    onMouseEnter: () => void;
+    onMouseLeave: () => void;
+    canReset: boolean;
+    canRegenerate: boolean;
+    expandedActionId: string | null;
+    onToggleActions: () => void;
+    onResetAfter: () => void;
+    onRegenerate: () => void;
+    onTouchStart: () => void;
+    onTouchEnd: () => void;
+    onTouchMove: () => void;
+}
+
+function MessageBubble({
+    message,
+    timestamp,
+    index,
+    isStreaming,
+    isThinking,
+    isHovered,
+    onMouseEnter,
+    onMouseLeave,
+    canReset,
+    canRegenerate,
+    expandedActionId,
+    onToggleActions,
+    onResetAfter,
+    onRegenerate,
+    onTouchStart,
+    onTouchEnd,
+    onTouchMove,
+}: MessageBubbleProps) {
     const isUser = message.role === 'user';
+    const showActions = isHovered && !isStreaming && (canReset || canRegenerate);
 
     return (
-        <div style={{
-            marginBottom: 20,
-            animation: `fadeIn 0.4s ease-out ${Math.min(index * 0.05, 0.3)}s both`,
-        }}>
+        <div
+            style={{
+                marginBottom: 20,
+                animation: `fadeIn 0.4s ease-out ${Math.min(index * 0.05, 0.3)}s both`,
+            }}
+            onMouseEnter={onMouseEnter}
+            onMouseLeave={onMouseLeave}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+            onTouchMove={onTouchMove}
+        >
             <div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -530,13 +843,36 @@ function MessageBubble({ message, timestamp, index, isStreaming }: { message: Me
                 }}>
                     {isUser ? 'You' : 'Assistant'}
                 </span>
-                <span style={{
-                    fontSize: 11,
-                    color: 'var(--chat-text-muted)',
-                    opacity: 0.7,
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
                 }}>
-                    {timestamp}
-                </span>
+                    <span style={{
+                        fontSize: 11,
+                        color: 'var(--chat-text-muted)',
+                        opacity: 0.7,
+                    }}>
+                        {timestamp}
+                    </span>
+                    {/* Message Actions */}
+                    <div style={{
+                        opacity: showActions ? 1 : 0,
+                        transition: 'opacity 150ms ease',
+                        pointerEvents: showActions ? 'auto' : 'none',
+                    }}>
+                        <MessageActions
+                            messageId={message.id}
+                            messageRole={message.role}
+                            canReset={canReset}
+                            canRegenerate={canRegenerate}
+                            isExpanded={expandedActionId === message.id}
+                            onToggle={onToggleActions}
+                            onResetAfter={onResetAfter}
+                            onRegenerate={onRegenerate}
+                        />
+                    </div>
+                </div>
             </div>
             <div style={{
                 padding: '18px 22px',
@@ -559,16 +895,35 @@ function MessageBubble({ message, timestamp, index, isStreaming }: { message: Me
                     </p>
                 ) : (
                     <>
-                        <MarkdownRenderer content={message.content} />
-                        {isStreaming && (
+                        {/* Show thinking indicator when model is in thinking mode */}
+                        {isThinking && !message.content && (
+                            <ThinkingIndicator />
+                        )}
+                        {/* Show content with streaming cursor */}
+                        {message.content && (
+                            <>
+                                <MarkdownRenderer content={message.content} />
+                                {isStreaming && (
+                                    <span style={{
+                                        display: 'inline-block',
+                                        width: 2,
+                                        height: '1em',
+                                        marginLeft: 2,
+                                        background: 'var(--chat-accent)',
+                                        animation: 'blink 1s ease-in-out infinite',
+                                        verticalAlign: 'text-bottom',
+                                    }} />
+                                )}
+                            </>
+                        )}
+                        {/* Show cursor when loading but not thinking (waiting for first chunk) */}
+                        {isStreaming && !isThinking && !message.content && (
                             <span style={{
                                 display: 'inline-block',
                                 width: 2,
                                 height: '1em',
-                                marginLeft: 2,
                                 background: 'var(--chat-accent)',
                                 animation: 'blink 1s ease-in-out infinite',
-                                verticalAlign: 'text-bottom',
                             }} />
                         )}
                     </>

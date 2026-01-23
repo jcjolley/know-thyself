@@ -202,75 +202,6 @@ export interface AppStatus {
 }
 
 // =============================================================================
-// API exposed to renderer via contextBridge
-// =============================================================================
-
-export interface ElectronAPI {
-    chat: {
-        send: (message: string, conversationId?: string) => Promise<{ response: string; conversationId: string; title?: string }>;
-        stream: (message: string, conversationId?: string) => void;
-        onChunk: (callback: (chunk: string) => void) => void;
-        onDone: (callback: (payload?: ChatStreamDonePayload) => void) => void;
-        onError: (callback: (error: string) => void) => void;
-        removeAllListeners: () => void;
-    };
-    messages: {
-        history: (conversationId?: string) => Promise<Message[]>;
-    };
-    conversations: {
-        list: () => Promise<ConversationListItem[]>;
-        create: () => Promise<Conversation & { title: string }>;
-        get: (id: string) => Promise<ConversationWithMessages | null>;
-        updateTitle: (id: string, title: string) => Promise<boolean>;
-        delete: (id: string) => Promise<boolean>;
-        search: (query: string) => Promise<ConversationSearchResult[]>;
-        getCurrent: () => Promise<(Conversation & { title: string }) | null>;
-    };
-    profile: {
-        get: () => Promise<ProfileSummary>;
-        getSummary: () => Promise<FullProfileSummary>;
-    };
-    embeddings: {
-        embed: (text: string) => Promise<number[]>;
-        isReady: () => Promise<boolean>;
-    };
-    app: {
-        getStatus: () => Promise<AppStatus>;
-    };
-    debug: {
-        getExtractions: (messageId?: string) => Promise<Extraction[]>;
-        waitForExtraction: (messageId: string, timeoutMs?: number) => Promise<Extraction | null>;
-        clearDatabase: () => Promise<void>;
-        getMessages: () => Promise<Message[]>;
-    };
-    admin?: {
-        getProfile: () => Promise<AdminProfileData>;
-        getEvidence: (dimension: string) => Promise<SignalEvidence[]>;
-        getMessagesWithPrompts: (limit?: number) => Promise<MessageWithPrompt[]>;
-        reanalyze: () => Promise<void>;
-        onReanalyzeProgress: (callback: (progress: ReanalyzeProgress) => void) => void;
-        removeReanalyzeProgressListener: () => void;
-    };
-    apiKey: {
-        getStatus: () => Promise<ApiKeyStatus>;
-        save: (key: string) => Promise<{ success: boolean; error?: string }>;
-        clear: () => Promise<boolean>;
-        validate: (key: string) => Promise<{ valid: boolean; error?: string }>;
-    };
-    journeys: {
-        list: () => Promise<JourneyInfo[]>;
-        start: (journeyId: string) => Promise<JourneyStartResult>;
-    };
-    llm: {
-        getConfig: () => Promise<LLMConfig>;
-        setConfig: (config: Partial<LLMConfig>) => Promise<void>;
-        testConnection: () => Promise<{ ok: boolean; error?: string }>;
-        getStatus: () => Promise<LLMStatus>;
-        listOllamaModels: (baseUrl?: string) => Promise<OllamaModel[]>;
-    };
-}
-
-// =============================================================================
 // Extended Extraction Types (Phase 2.5)
 // =============================================================================
 
@@ -670,8 +601,17 @@ export interface JourneyStartResult {
     title: string;
 }
 
-declare global {
-    interface Window {
-        api: ElectronAPI;
-    }
+// =============================================================================
+// Message Reset & Regenerate Types (Phase 10)
+// =============================================================================
+
+export type RegenerateResult =
+    | { type: 'chat'; userMessage: string; conversationId: string }
+    | { type: 'journey'; journeyId: string; conversationId: string }
+    | { type: 'error'; error: string };
+
+export interface ResetAfterResult {
+    success: boolean;
+    deletedCount?: number;
+    error?: string;
 }
