@@ -418,6 +418,32 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
         return !isLoading && message.role === 'assistant';
     };
 
+    // Handle quote click - insert quoted text into input
+    const handleQuoteClick = useCallback((text: string) => {
+        // Format as blockquote (each line prefixed with >)
+        const quotedText = text
+            .split('\n')
+            .map(line => `> ${line}`)
+            .join('\n');
+
+        // Prepend to existing input or set as new input
+        setInput(prev => {
+            if (prev.trim()) {
+                return `${quotedText}\n\n${prev}`;
+            }
+            return `${quotedText}\n\n`;
+        });
+
+        // Focus textarea and position cursor at end
+        setTimeout(() => {
+            if (textareaRef.current) {
+                textareaRef.current.focus();
+                const length = textareaRef.current.value.length;
+                textareaRef.current.setSelectionRange(length, length);
+            }
+        }, 0);
+    }, []);
+
     return (
         <div style={{
             ...cssVars,
@@ -527,6 +553,7 @@ export function ChatPage({ conversationId, onConversationUpdated }: ChatPageProp
                         onTouchStart={() => handleTouchStart(msg, index)}
                         onTouchEnd={handleTouchEnd}
                         onTouchMove={handleTouchMove}
+                        onQuoteClick={handleQuoteClick}
                     />
                 ))}
 
@@ -792,6 +819,7 @@ interface MessageBubbleProps {
     onTouchStart: () => void;
     onTouchEnd: () => void;
     onTouchMove: () => void;
+    onQuoteClick?: (text: string) => void;
 }
 
 function MessageBubble({
@@ -812,6 +840,7 @@ function MessageBubble({
     onTouchStart,
     onTouchEnd,
     onTouchMove,
+    onQuoteClick,
 }: MessageBubbleProps) {
     const isUser = message.role === 'user';
     const showActions = isHovered && !isStreaming && (canReset || canRegenerate);
@@ -902,7 +931,11 @@ function MessageBubble({
                         {/* Show content with streaming cursor */}
                         {message.content && (
                             <>
-                                <MarkdownRenderer content={message.content} />
+                                <MarkdownRenderer
+                                    content={message.content}
+                                    onParagraphClick={onQuoteClick}
+                                    isClickable={!isStreaming}
+                                />
                                 {isStreaming && (
                                     <span style={{
                                         display: 'inline-block',
