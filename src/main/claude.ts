@@ -42,7 +42,7 @@ export function buildResponsePrompts(message: string, context: AssembledContext)
 
     // Use journey-specific prompt if this is a journey conversation
     if (context.journey && context.journey.systemPrompt) {
-        console.log(`[claude] Using journey prompt for: ${context.journey.id}`);
+        console.log(`[llm] Using journey prompt for: ${context.journey.id}`);
         system = buildJourneySystemPrompt(
             context.journey.systemPrompt,
             context.profileSummary || '',
@@ -107,7 +107,7 @@ export async function* streamResponse(
 
 /**
  * Generate an opening message for a journey conversation.
- * Claude sends the first message to welcome the user and begin the journey.
+ * The LLM sends the first message to welcome the user and begin the journey.
  */
 export async function generateJourneyOpening(
     journey: JourneyInfo,
@@ -133,7 +133,7 @@ export async function generateJourneyOpening(
 
     // Ensure we don't return empty content
     if (!result || result.trim().length === 0) {
-        console.warn('[claude] Journey opening returned empty, using fallback');
+        console.warn('[llm] Journey opening returned empty, using fallback');
         return `Welcome to "${journey.title}". I'm looking forward to exploring this topic with you. What draws you to this area of reflection?`;
     }
 
