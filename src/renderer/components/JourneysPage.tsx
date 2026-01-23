@@ -1,6 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
 import type { Theme } from '../styles/theme';
+
+// =============================================================================
+// Loading Messages - Contemplative phrases for journey preparation
+// =============================================================================
+
+const LOADING_MESSAGES = [
+    'Preparing your space...',
+    'Gathering your threads...',
+    'Setting the stage...',
+    'Finding the right words...',
+    'Tuning in...',
+    'Making room for reflection...',
+    'Quieting the noise...',
+    'Opening the door...',
+    'Lighting the path...',
+    'Almost there...',
+];
 
 // =============================================================================
 // Types
@@ -289,6 +306,16 @@ export function JourneysPage({ onStartJourney }: JourneysPageProps) {
                     from { transform: rotate(0deg); }
                     to { transform: rotate(360deg); }
                 }
+                @keyframes dotPulse {
+                    0%, 80%, 100% {
+                        opacity: 0.3;
+                        transform: scale(0.8);
+                    }
+                    40% {
+                        opacity: 1;
+                        transform: scale(1);
+                    }
+                }
             `}</style>
         </div>
     );
@@ -389,6 +416,40 @@ interface JourneyDetailProps {
 }
 
 function JourneyDetail({ journey, onClose, onStart, isStarting, styles }: JourneyDetailProps) {
+    const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+    const [isMessageVisible, setIsMessageVisible] = useState(true);
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Cycle through loading messages when starting
+    useEffect(() => {
+        if (isStarting) {
+            // Reset to first message
+            setLoadingMessageIndex(0);
+            setIsMessageVisible(true);
+
+            intervalRef.current = setInterval(() => {
+                // Fade out
+                setIsMessageVisible(false);
+
+                // After fade out, change message and fade in
+                setTimeout(() => {
+                    setLoadingMessageIndex(prev =>
+                        prev < LOADING_MESSAGES.length - 1 ? prev + 1 : prev
+                    );
+                    setIsMessageVisible(true);
+                }, 200);
+            }, 2500);
+
+            return () => {
+                if (intervalRef.current) {
+                    clearInterval(intervalRef.current);
+                }
+            };
+        }
+    }, [isStarting]);
+
+    const currentLoadingMessage = LOADING_MESSAGES[loadingMessageIndex];
+
     return (
         <div style={styles.modalOverlay} onClick={onClose}>
             <div
@@ -463,29 +524,30 @@ function JourneyDetail({ journey, onClose, onStart, isStarting, styles }: Journe
                     <button
                         style={{
                             ...styles.startButton,
-                            opacity: isStarting ? 0.7 : 1,
                             cursor: isStarting ? 'wait' : 'pointer',
                         }}
                         onClick={onStart}
                         disabled={isStarting}
                     >
                         {isStarting ? (
-                            <>
-                                <svg
-                                    width="20"
-                                    height="20"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    style={{ animation: 'spin 1s linear infinite' }}
+                            <div style={styles.loadingContainer}>
+                                {/* Animated dots */}
+                                <div style={styles.loadingDots}>
+                                    <span style={{ ...styles.loadingDot, animationDelay: '0s' }} />
+                                    <span style={{ ...styles.loadingDot, animationDelay: '0.15s' }} />
+                                    <span style={{ ...styles.loadingDot, animationDelay: '0.3s' }} />
+                                </div>
+                                {/* Rotating message */}
+                                <span
+                                    style={{
+                                        ...styles.loadingMessage,
+                                        opacity: isMessageVisible ? 1 : 0,
+                                        transform: isMessageVisible ? 'translateY(0)' : 'translateY(-4px)',
+                                    }}
                                 >
-                                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                                </svg>
-                                <span>Starting...</span>
-                            </>
+                                    {currentLoadingMessage}
+                                </span>
+                            </div>
                         ) : (
                             <>
                                 <span>Begin Journey</span>
@@ -833,6 +895,31 @@ function getStyles(theme: Theme, isDark: boolean): Record<string, React.CSSPrope
             boxShadow: isDark
                 ? '0 4px 16px rgba(212, 165, 116, 0.2)'
                 : '0 4px 16px rgba(180, 130, 80, 0.3)',
+            minHeight: 56,
+        },
+        loadingContainer: {
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+        },
+        loadingDots: {
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+        },
+        loadingDot: {
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: 'rgba(255, 255, 255, 0.9)',
+            animation: 'dotPulse 1.2s ease-in-out infinite',
+        },
+        loadingMessage: {
+            fontSize: 15,
+            fontWeight: 500,
+            fontStyle: 'italic',
+            letterSpacing: '0.01em',
+            transition: 'opacity 0.2s ease, transform 0.2s ease',
         },
     };
 }
