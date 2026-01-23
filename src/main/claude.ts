@@ -3,7 +3,10 @@ import { RESPONSE_SYSTEM_PROMPT, RESPONSE_USER_PROMPT, buildStyleGuidance, build
 import { buildJourneyOpeningPrompt } from './prompts/journey-opening.js';
 import { isMockEnabled, getMockResponse } from './claude-mock.js';
 import { getApiKey } from './api-key-storage.js';
-import { llmManager } from './llm/manager.js';
+import { llmManager, THINKING_MARKER } from './llm/index.js';
+
+// Re-export for use by callers
+export { THINKING_MARKER };
 import type { AssembledContext } from './context.js';
 import type { JourneyInfo } from '../shared/types.js';
 
@@ -157,7 +160,7 @@ export async function generateResponse(
         return await provider.generateText(
             [{ role: 'user', content: prompts.user }],
             prompts.system,
-            { maxTokens: 1024 }
+            { maxTokens: 4096 }
         );
     }
 
@@ -189,10 +192,11 @@ export async function* streamResponse(
     // Use LLM manager if available (supports Ollama and Claude)
     if (shouldUseLLMManager()) {
         const provider = llmManager.getProvider();
+        // Use higher token limit for thinking models (thinking uses tokens too)
         yield* provider.streamText(
             [{ role: 'user', content: prompts.user }],
             prompts.system,
-            { maxTokens: 1024 }
+            { maxTokens: 4096 }
         );
         return;
     }

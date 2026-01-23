@@ -101,6 +101,8 @@ interface FeatureModel {
 | File | Purpose |
 |------|---------|
 | `path/to/new/file.ts` | [Brief purpose] |
+| `tests/unit/<feature>.test.ts` | Unit tests for US-001, US-002, etc. |
+| `tests/<prd-name>.spec.ts` | E2E test for complete PRD flow |
 
 ### Files to Modify
 | File | Changes |
@@ -109,13 +111,44 @@ interface FeatureModel {
 
 ---
 
+## Test Plan
+
+### Unit Tests (per User Story)
+**File:** `tests/unit/<feature>.test.ts`
+
+```typescript
+describe('US-001: [Story Title]', () => {
+  it('US-001: [acceptance criterion 1]', () => { ... });
+  it('US-001: [acceptance criterion 2]', () => { ... });
+});
+
+describe('US-002: [Story Title]', () => {
+  it('US-002: [acceptance criterion 1]', () => { ... });
+});
+```
+
+### E2E Test (for PRD)
+**File:** `tests/<prd-name>.spec.ts`
+
+```typescript
+test.describe('[PRD Phase]: [Feature Name]', () => {
+  test('US-001/US-002: [complete user flow description]', async () => {
+    // Verify end-to-end functionality
+  });
+});
+```
+
+---
+
 ## Quality Gates
 [Commands that must pass for each phase/story]
 
 - `npm run typecheck` - Type checking passes
 - `npm run lint` - No linting errors
-- `npm run test` - All tests pass
+- `npm run test` - All tests pass (unit + E2E)
 - `npm run build` - Build succeeds
+- Unit tests cover all user story acceptance criteria
+- E2E test validates complete feature flow
 
 ### Post-Verification: Code Simplification
 After all quality gates pass, run the code simplifier and re-verify:

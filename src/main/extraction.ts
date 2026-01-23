@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { v4 as uuidv4 } from 'uuid';
+import { llmManager } from './llm/manager.js';
 import { getDb } from './db/sqlite.js';
 import { getMessageById } from './db/messages.js';
 import { buildExtractionPrompt } from './prompts/extraction.js';
@@ -30,8 +30,6 @@ import { NARRATIVE_SYNTHESIS_PROMPT, type NarrativeSummary } from './prompts/nar
 import type { ReanalyzeProgress } from '../shared/types.js';
 import type { CompleteExtractionResult, Extraction } from '../shared/types.js';
 
-const EXTRACTION_MODEL = 'claude-haiku-4-5';
-
 export async function runExtraction(messageId: string, conversationId: string): Promise<Extraction> {
     const db = getDb();
     const message = getMessageById(messageId);
@@ -48,24 +46,18 @@ export async function runExtraction(messageId: string, conversationId: string): 
         console.log('[extraction] Using mock extraction');
         extractionJson = getMockExtraction(message.content);
     } else {
-        console.log('[extraction] Calling Claude API with model:', EXTRACTION_MODEL);
-        const client = new Anthropic();
+        const provider = llmManager.getProvider();
+        console.log('[extraction] Using LLM provider:', provider.name);
 
         try {
-            const response = await client.messages.create({
-                model: EXTRACTION_MODEL,
-                max_tokens: 2000,
-                messages: [{
-                    role: 'user',
-                    content: buildExtractionPrompt(message.content),
-                }],
-            });
+            const rawResponse = await provider.generateText(
+                [{ role: 'user', content: buildExtractionPrompt(message.content) }],
+                undefined,
+                { maxTokens: 2000 }
+            );
 
-            const rawResponse = response.content[0].type === 'text'
-                ? response.content[0].text
-                : '';
-            console.log('[extraction] Claude response length:', rawResponse.length);
-            console.log('[extraction] Claude response preview:', rawResponse.slice(0, 200));
+            console.log('[extraction] Response length:', rawResponse.length);
+            console.log('[extraction] Response preview:', rawResponse.slice(0, 200));
 
             // Strip markdown code fences if present
             extractionJson = rawResponse
@@ -74,7 +66,7 @@ export async function runExtraction(messageId: string, conversationId: string): 
                 .replace(/\s*```$/i, '')
                 .trim();
         } catch (err) {
-            console.error('[extraction] Claude API error:', err);
+            console.error('[extraction] LLM API error:', err);
             throw err;
         }
     }
@@ -364,7 +356,6 @@ async function applyExtractionToProfile(
 // Narrative Synthesis (Phase 3.2)
 // =============================================================================
 
-const NARRATIVE_MODEL = 'claude-haiku-4-5';
 
 /**
  * Check if narrative regeneration is needed based on trigger conditions.
@@ -402,8 +393,8 @@ export async function synthesizeNarrative(): Promise<NarrativeSummary | null> {
                     ? JSON.stringify(existingNarrative, null, 2)
                     : 'None (first generation)');
 
-            // Call Claude Haiku
-            response = await callHaikuForNarrative(prompt);
+            // Call LLM provider
+            response = await callLLMForNarrative(prompt);
         }
 
         // Parse response
@@ -454,24 +445,20 @@ function parseNarrativeResponse(response: string): NarrativeSummary | null {
 }
 
 /**
- * Call Claude Haiku for narrative synthesis with retry logic.
- * Retries on 429 (rate limit) and 529 (overloaded) errors.
+ * Call LLM for narrative synthesis with retry logic.
  */
-async function callHaikuForNarrative(prompt: string): Promise<string> {
-    const anthropic = new Anthropic();
+async function callLLMForNarrative(prompt: string): Promise<string> {
+    const provider = llmManager.getProvider();
     const maxRetries = 3;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
-            const response = await anthropic.messages.create({
-                model: NARRATIVE_MODEL,
-                max_tokens: 1000,
-                messages: [{ role: 'user', content: prompt }],
-            });
-
-            const textBlock = response.content.find(block => block.type === 'text');
-            return textBlock?.text ?? '';
+            return await provider.generateText(
+                [{ role: 'user', content: prompt }],
+                undefined,
+                { maxTokens: 1000 }
+            );
         } catch (err) {
             lastError = err as Error;
             const status = (err as { status?: number }).status;

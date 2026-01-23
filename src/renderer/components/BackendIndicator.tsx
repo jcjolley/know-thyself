@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useApi } from '../contexts/ApiContext';
 import type { LLMStatus } from '../../shared/types';
 
 interface BackendIndicatorProps {
@@ -8,13 +9,14 @@ interface BackendIndicatorProps {
 
 export function BackendIndicator({ onClick }: BackendIndicatorProps) {
   const { theme, isDark } = useTheme();
+  const api = useApi();
   const [status, setStatus] = useState<LLMStatus | null>(null);
 
   // Load status on mount
   useEffect(() => {
     const loadStatus = async () => {
       try {
-        const loadedStatus = await window.api.llm.getStatus();
+        const loadedStatus = await api.llm.getStatus();
         setStatus(loadedStatus);
       } catch (error) {
         console.error('Failed to load LLM status:', error);
@@ -26,7 +28,7 @@ export function BackendIndicator({ onClick }: BackendIndicatorProps) {
     // Refresh status periodically
     const interval = setInterval(loadStatus, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [api]);
 
   if (!status) {
     return null;

@@ -14,9 +14,10 @@ PRDs for AI agents serve as **programming interfaces**, not alignment documents.
 Every PRD must include:
 - **Overview** - 1-2 sentences max
 - **Non-Goals** - Explicit scope boundaries (AI cannot infer from omission)
-- **User Stories** - Atomic, testable requirements
+- **User Stories** - Atomic, testable requirements (each with unit test)
 - **Phases** - Dependency-ordered implementation steps
 - **Files Summary** - Explicit file paths
+- **Test Plan** - Unit test per user story + E2E test for PRD
 - **Verification Checklist** - Testable completion criteria
 
 ### 2. Write for Sequential Execution
@@ -58,6 +59,7 @@ Each story should be completable in one agent session:
 - Describable in 2-3 sentences
 - Has 3-5 specific acceptance criteria
 - Maps to 1-3 files maximum
+- **Must have a corresponding unit test**
 
 **Format**:
 ```markdown
@@ -68,6 +70,13 @@ Each story should be completable in one agent session:
 
 **Acceptance Criteria:**
 - [ ] Given [context], when [action], then [result]
+```
+
+**Test Naming:** Tests must reference the user story ID they validate:
+```typescript
+describe('US-001: Descriptive Title', () => {
+  it('US-001: [acceptance criterion description]', () => { ... });
+});
 ```
 
 ### Write Testable Acceptance Criteria
@@ -135,6 +144,37 @@ Explicitly state what must not change:
 
 ---
 
+## Testing Requirements
+
+### Unit Tests for User Stories
+Every user story (US-XXX) must have a corresponding unit test:
+- Test file: `tests/unit/<feature>.test.ts`
+- Test name should reference the user story ID
+- Cover all acceptance criteria
+
+```typescript
+// tests/unit/feature-name.test.ts
+describe('US-001: Feature Title', () => {
+  it('should [acceptance criterion 1]', () => { ... });
+  it('should [acceptance criterion 2]', () => { ... });
+});
+```
+
+### E2E Test for PRD
+Every PRD must have a corresponding Playwright E2E test:
+- Test file: `tests/<prd-name>.spec.ts`
+- Verify the complete user flow works end-to-end
+- Run after all phases are complete
+
+```typescript
+// tests/markdown-rendering.spec.ts
+test.describe('Phase 6.1: Markdown Rendering', () => {
+  test('renders markdown in assistant messages', async () => { ... });
+});
+```
+
+---
+
 ## Quality Gates
 
 ### Define Verification Commands
@@ -142,7 +182,7 @@ Explicitly state what must not change:
 ## Quality Gates
 - `npm run typecheck` - Type checking passes
 - `npm run lint` - No linting errors
-- `npm run test` - All tests pass
+- `npm run test` - All tests pass (unit + E2E)
 - `npm run build` - Build succeeds
 ```
 

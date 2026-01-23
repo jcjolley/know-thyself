@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  know-thyself:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Use host network to access Ollama on localhost
+    network_mode: host
+    environment:
+      - NODE_ENV=production
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OLLAMA_BASE_URL=http://localhost:11434
+      - DATA_DIR=/app/data
+      - PORT=3000
+    volumes:
+      - know-thyself-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  know-thyself-data:
+    driver: local

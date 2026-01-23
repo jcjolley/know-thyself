@@ -9,10 +9,12 @@ export interface ConversationListItem {
     updated_at: string;
     message_count: number;
     preview: string | null;
+    journey_id: string | null;
 }
 
 export interface ConversationWithMessages extends Conversation {
     title: string;
+    journey_id: string | null;
     messages: Message[];
 }
 
@@ -36,6 +38,7 @@ export function listConversations(): ConversationListItem[] {
             COALESCE(c.title, 'New Conversation') as title,
             c.created_at,
             c.updated_at,
+            c.journey_id,
             COUNT(m.id) as message_count,
             (
                 SELECT SUBSTR(content, 1, 60)
@@ -53,18 +56,19 @@ export function listConversations(): ConversationListItem[] {
 
 /**
  * Create a new empty conversation.
+ * Optionally specify a journey_id for guided journey conversations.
  */
-export function createConversation(title: string = 'New Conversation'): Conversation & { title: string } {
+export function createConversation(title: string = 'New Conversation', journeyId?: string): Conversation & { title: string; journey_id: string | null } {
     const db = getDb();
     const id = uuidv4();
     const now = new Date().toISOString();
 
     db.prepare(`
-        INSERT INTO conversations (id, title, created_at, updated_at)
-        VALUES (?, ?, ?, ?)
-    `).run(id, title, now, now);
+        INSERT INTO conversations (id, title, journey_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(id, title, journeyId || null, now, now);
 
-    return { id, title, created_at: now, updated_at: now };
+    return { id, title, journey_id: journeyId || null, created_at: now, updated_at: now };
 }
 
 /**
@@ -74,10 +78,10 @@ export function getConversationById(id: string): ConversationWithMessages | null
     const db = getDb();
 
     const conversation = db.prepare(`
-        SELECT id, COALESCE(title, 'New Conversation') as title, created_at, updated_at
+        SELECT id, COALESCE(title, 'New Conversation') as title, journey_id, created_at, updated_at
         FROM conversations
         WHERE id = ?
-    `).get(id) as (Conversation & { title: string }) | undefined;
+    `).get(id) as (Conversation & { title: string; journey_id: string | null }) | undefined;
 
     if (!conversation) {
         return null;
@@ -231,15 +235,15 @@ export function generateTitleFromMessage(message: string): string {
 /**
  * Get the most recent conversation (for backwards compatibility).
  */
-export function getMostRecentConversation(): (Conversation & { title: string }) | null {
+export function getMostRecentConversation(): (Conversation & { title: string; journey_id: string | null }) | null {
     const db = getDb();
 
     const conversation = db.prepare(`
-        SELECT id, COALESCE(title, 'New Conversation') as title, created_at, updated_at
+        SELECT id, COALESCE(title, 'New Conversation') as title, journey_id, created_at, updated_at
         FROM conversations
         ORDER BY updated_at DESC
         LIMIT 1
-    `).get() as (Conversation & { title: string }) | undefined;
+    `).get() as (Conversation & { title: string; journey_id: string | null }) | undefined;
 
     return conversation || null;
 }

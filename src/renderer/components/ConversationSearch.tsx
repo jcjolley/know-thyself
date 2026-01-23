@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface ConversationSearchProps {
     value: string;
@@ -6,6 +7,7 @@ interface ConversationSearchProps {
 }
 
 export function ConversationSearch({ value, onChange }: ConversationSearchProps) {
+    const { theme, isDark } = useTheme();
     const [isFocused, setIsFocused] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -45,16 +47,16 @@ export function ConversationSearch({ value, onChange }: ConversationSearchProps)
         width: '100%',
         height: 36,
         padding: '0 32px 0 36px',
-        border: `1px solid ${isFocused ? 'rgba(196, 149, 106, 0.5)' : 'rgba(139, 129, 120, 0.2)'}`,
+        border: `1px solid ${isFocused ? theme.colors.accent : theme.colors.border}`,
         borderRadius: 8,
-        background: isFocused ? '#ffffff' : 'rgba(255, 255, 255, 0.6)',
+        background: isFocused ? theme.colors.surface : (isDark ? theme.colors.background : 'rgba(255, 255, 255, 0.6)'),
         fontFamily: 'system-ui, -apple-system, sans-serif',
         fontSize: 13,
-        color: '#3d3630',
+        color: theme.colors.textPrimary,
         outline: 'none',
         transition: 'all 150ms ease',
         boxShadow: isFocused
-            ? '0 2px 8px rgba(196, 149, 106, 0.15), inset 0 1px 2px rgba(0, 0, 0, 0.02)'
+            ? `0 2px 8px ${theme.colors.accentSoft}, inset 0 1px 2px rgba(0, 0, 0, 0.02)`
             : 'inset 0 1px 2px rgba(0, 0, 0, 0.02)',
         boxSizing: 'border-box',
     };
@@ -66,7 +68,7 @@ export function ConversationSearch({ value, onChange }: ConversationSearchProps)
         transform: 'translateY(-50%)',
         width: 16,
         height: 16,
-        color: isFocused ? '#c4956a' : '#8b8178',
+        color: isFocused ? theme.colors.accent : theme.colors.textSecondary,
         transition: 'color 150ms ease',
         pointerEvents: 'none',
     };
@@ -85,7 +87,7 @@ export function ConversationSearch({ value, onChange }: ConversationSearchProps)
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: 4,
-        color: '#8b8178',
+        color: theme.colors.textSecondary,
         padding: 0,
         transition: 'all 150ms ease',
     };
@@ -125,12 +127,12 @@ export function ConversationSearch({ value, onChange }: ConversationSearchProps)
                     }
                 }}
                 onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(139, 129, 120, 0.1)';
-                    e.currentTarget.style.color = '#3d3630';
+                    e.currentTarget.style.background = theme.colors.accentSoft;
+                    e.currentTarget.style.color = theme.colors.textPrimary;
                 }}
                 onMouseLeave={(e) => {
                     e.currentTarget.style.background = 'transparent';
-                    e.currentTarget.style.color = '#8b8178';
+                    e.currentTarget.style.color = theme.colors.textSecondary;
                 }}
                 aria-label="Clear search"
                 tabIndex={value ? 0 : -1}

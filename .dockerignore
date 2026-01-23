@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build output (we build inside Docker)
+dist/
+
+# Development files
+*.log
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+coverage/
+test-results/
+playwright-report/
+
+# Electron-specific (not needed for web)
+*.app
+*.exe
+*.dmg
+
+# Data (we use volumes)
+data/
+*.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+docs/
+!docs/journeys/
+*.md
+!README.md
+
+# Config files not needed in Docker
+.eslintrc*
+.prettierrc*
+playwright.config.ts
+vitest.config.ts

@@ -35,3 +35,6 @@ test-results/
 playwright-report/
 coverage/
 test-data/
+
+# Runtime data (models, databases, configs)
+data/

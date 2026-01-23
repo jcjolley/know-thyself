@@ -1,8 +1,8 @@
 import { fork, ChildProcess } from 'child_process';
-import { app } from 'electron';
 import path from 'path';
 import fs from 'fs/promises';
 import { fileURLToPath } from 'url';
+import { paths } from './paths.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +30,7 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
 }
 
 async function ensureModelFiles(): Promise<{ modelPath: string; tokenizerPath: string }> {
-    const modelDir = path.join(app.getPath('userData'), 'models', 'voyage-4-nano');
+    const modelDir = path.join(paths.models, 'voyage-4-nano');
     await fs.mkdir(modelDir, { recursive: true });
 
     const modelPath = path.join(modelDir, MODEL_FILE);

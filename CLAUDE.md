@@ -22,8 +22,20 @@ AI-guided self-reflection desktop app. Users converse with Claude; system extrac
 1. **ESM in main process** → use `.js` extensions in imports
 2. **Relative imports only** in `src/main/` (no `@/` path aliases)
 3. **CommonJS in preload** → separate tsconfig, different module system
-4. **Tests required** → every feature needs Playwright tests (80%+ coverage)
+4. **Tests required** → see testing rules below
 5. **Use make targets** → not `npm run` directly
+
+## Testing Requirements
+
+| Scope | Requirement | Location |
+|-------|-------------|----------|
+| **User Story** | Unit test for each US-XXX | `tests/unit/<feature>.test.ts` |
+| **PRD** | E2E test for complete flow | `tests/<prd-name>.spec.ts` |
+| **Coverage** | 80%+ code coverage | `make test-coverage` |
+
+Every PRD implementation must include:
+- Unit tests validating each user story's acceptance criteria
+- E2E Playwright test verifying the complete feature works
 
 ## Domain Terms
 

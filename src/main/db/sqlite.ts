@@ -1,13 +1,12 @@
 import Database from 'better-sqlite3';
-import { app } from 'electron';
-import path from 'path';
+import { paths } from '../paths.js';
 
 let db: Database.Database | null = null;
 
 export function initSQLite(): Database.Database {
     if (db) return db;
 
-    const dbPath = path.join(app.getPath('userData'), 'know-thyself.db');
+    const dbPath = paths.sqlite;
     console.log(`Initializing SQLite at: ${dbPath}`);
 
     db = new Database(dbPath);
@@ -69,6 +68,15 @@ function runMigrations(database: Database.Database): void {
     if (!hasTitle) {
         console.log('Migration: Adding title column to conversations table');
         database.exec(`ALTER TABLE conversations ADD COLUMN title TEXT DEFAULT 'New Conversation'`);
+    }
+
+    // Check if conversations table has journey_id column
+    const conversationsInfoUpdated = database.prepare("PRAGMA table_info(conversations)").all() as { name: string }[];
+    const hasJourneyId = conversationsInfoUpdated.some(col => col.name === 'journey_id');
+
+    if (!hasJourneyId) {
+        console.log('Migration: Adding journey_id column to conversations table');
+        database.exec(`ALTER TABLE conversations ADD COLUMN journey_id TEXT`);
     }
 }
 

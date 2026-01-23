@@ -1,8 +1,8 @@
-import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import type { BackendType, LLMConfig } from './types.js';
 import { getApiKey } from '../api-key-storage.js';
+import { paths } from '../paths.js';
 
 const CONFIG_FILE = 'llm-config.json';
 
@@ -14,13 +14,14 @@ export interface StoredLLMConfig {
 }
 
 function getConfigPath(): string {
-  return path.join(app.getPath('userData'), CONFIG_FILE);
+  return path.join(paths.dataDir, CONFIG_FILE);
 }
 
 export function getDefaultConfig(): StoredLLMConfig {
   return {
     backend: 'ollama',
-    ollamaBaseUrl: 'http://localhost:11434',
+    // Use OLLAMA_BASE_URL env var for Docker/container deployments
+    ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
     // ollamaModel intentionally omitted - auto-detect first available
   };
 }

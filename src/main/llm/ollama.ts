@@ -1,5 +1,9 @@
 import type { ChatMessage, GenerationOptions, LLMProvider, OllamaModel } from './types.js';
 
+// Special marker to indicate the model is in "thinking" mode
+// This is yielded before actual content starts for thinking/reasoning models
+export const THINKING_MARKER = '\x00__THINKING__\x00';
+
 interface OllamaTagsResponse {
   models: Array<{
     name: string;
@@ -22,6 +26,8 @@ interface OllamaChatRequest {
   options?: {
     num_predict?: number;
     temperature?: number;
+    repeat_penalty?: number;
+    repeat_last_n?: number;
   };
 }
 
@@ -29,6 +35,7 @@ interface OllamaChatStreamChunk {
   message: {
     role: string;
     content: string;
+    thinking?: string;  // For thinking/reasoning models
   };
   done: boolean;
 }
@@ -144,8 +151,10 @@ export class OllamaProvider implements LLMProvider {
       messages: ollamaMessages,
       stream: false,
       options: {
-        num_predict: options?.maxTokens ?? 1024,
+        num_predict: options?.maxTokens ?? 4096,
         temperature: options?.temperature ?? 0.7,
+        repeat_penalty: 1.1,
+        repeat_last_n: 64,
       },
     };
 
@@ -177,8 +186,10 @@ export class OllamaProvider implements LLMProvider {
       messages: ollamaMessages,
       stream: true,
       options: {
-        num_predict: options?.maxTokens ?? 1024,
+        num_predict: options?.maxTokens ?? 4096,
         temperature: options?.temperature ?? 0.7,
+        repeat_penalty: 1.1,
+        repeat_last_n: 64,
       },
     };
 
@@ -200,6 +211,7 @@ export class OllamaProvider implements LLMProvider {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let isThinking = false;
 
     try {
       while (true) {
@@ -215,6 +227,17 @@ export class OllamaProvider implements LLMProvider {
 
           try {
             const chunk = JSON.parse(line) as OllamaChatStreamChunk;
+
+            // Thinking models output thinking first with empty content
+            if (chunk.message?.thinking && !chunk.message.content) {
+              // Signal that we're in thinking mode (only once)
+              if (!isThinking) {
+                isThinking = true;
+                yield THINKING_MARKER;
+              }
+              continue;
+            }
+
             if (chunk.message?.content) {
               yield chunk.message.content;
             }

@@ -1,6 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { ConversationListItem } from './ConversationSidebar';
 import { DeleteConfirmDialog } from './DeleteConfirmDialog';
+import { useTheme } from '../contexts/ThemeContext';
+
+interface ContextMenuState {
+    visible: boolean;
+    x: number;
+    y: number;
+}
 
 interface ConversationItemProps {
     conversation: ConversationListItem;
@@ -21,11 +28,14 @@ export function ConversationItem({
     onUpdateTitle,
     onDelete,
 }: ConversationItemProps) {
+    const { theme, isDark } = useTheme();
     const [isHovered, setIsHovered] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState(conversation.title);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [contextMenu, setContextMenu] = useState<ContextMenuState>({ visible: false, x: 0, y: 0 });
     const inputRef = useRef<HTMLInputElement>(null);
+    const menuRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (isEditing && inputRef.current) {
@@ -38,6 +48,45 @@ export function ConversationItem({
     useEffect(() => {
         setEditValue(conversation.title);
     }, [conversation.title]);
+
+    // Close context menu when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                setContextMenu({ visible: false, x: 0, y: 0 });
+            }
+        };
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setContextMenu({ visible: false, x: 0, y: 0 });
+            }
+        };
+        if (contextMenu.visible) {
+            document.addEventListener('mousedown', handleClickOutside);
+            document.addEventListener('keydown', handleEscape);
+        }
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleEscape);
+        };
+    }, [contextMenu.visible]);
+
+    const handleContextMenu = (e: React.MouseEvent) => {
+        if (collapsed) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setContextMenu({ visible: true, x: e.clientX, y: e.clientY });
+    };
+
+    const handleRename = () => {
+        setContextMenu({ visible: false, x: 0, y: 0 });
+        setIsEditing(true);
+    };
+
+    const handleDeleteFromMenu = () => {
+        setContextMenu({ visible: false, x: 0, y: 0 });
+        setShowDeleteConfirm(true);
+    };
 
     const formatDate = (dateString: string): string => {
         const date = new Date(dateString);
@@ -94,12 +143,12 @@ export function ConversationItem({
         borderRadius: 8,
         cursor: 'pointer',
         background: isActive
-            ? 'linear-gradient(135deg, rgba(196, 149, 106, 0.15) 0%, rgba(196, 149, 106, 0.08) 100%)'
+            ? `linear-gradient(135deg, ${theme.colors.accentSoft} 0%, rgba(196, 149, 106, 0.08) 100%)`
             : isHovered
-            ? 'rgba(255, 255, 255, 0.6)'
+            ? (isDark ? theme.colors.surfaceHover : 'rgba(255, 255, 255, 0.6)')
             : 'transparent',
         border: isActive
-            ? '1px solid rgba(196, 149, 106, 0.3)'
+            ? `1px solid ${isDark ? theme.colors.accent : 'rgba(196, 149, 106, 0.3)'}`
             : '1px solid transparent',
         transition: 'all 150ms ease',
         animation: `fadeInItem 200ms ease ${index * 30}ms both`,
@@ -117,7 +166,7 @@ export function ConversationItem({
         fontFamily: 'Georgia, "Times New Roman", serif',
         fontSize: collapsed ? 14 : 11,
         fontWeight: 400,
-        color: isActive ? '#c4956a' : '#a09890',
+        color: isActive ? theme.colors.accent : theme.colors.textMuted,
         fontStyle: 'italic',
         lineHeight: 1,
     };
@@ -132,7 +181,7 @@ export function ConversationItem({
         fontFamily: 'Georgia, "Times New Roman", serif',
         fontSize: 14,
         fontWeight: 400,
-        color: isActive ? '#3d3630' : '#4a4540',
+        color: isActive ? theme.colors.textPrimary : (isDark ? theme.colors.textSecondary : '#4a4540'),
         margin: 0,
         lineHeight: 1.35,
         overflow: 'hidden',
@@ -146,9 +195,10 @@ export function ConversationItem({
         width: '100%',
         padding: '2px 4px',
         margin: '-2px -4px',
-        border: '1px solid rgba(196, 149, 106, 0.5)',
+        border: `1px solid ${theme.colors.accent}`,
         borderRadius: 4,
-        background: '#fff',
+        background: theme.colors.surface,
+        color: theme.colors.textPrimary,
         outline: 'none',
         boxSizing: 'border-box',
     };
@@ -159,38 +209,19 @@ export function ConversationItem({
         gap: 8,
         fontFamily: 'system-ui, -apple-system, sans-serif',
         fontSize: 11,
-        color: '#8b8178',
+        color: theme.colors.textSecondary,
     };
 
     const previewStyle: React.CSSProperties = {
         fontFamily: 'system-ui, -apple-system, sans-serif',
         fontSize: 12,
-        color: '#9a918a',
+        color: theme.colors.textMuted,
         margin: 0,
         lineHeight: 1.4,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
         fontStyle: 'italic',
-    };
-
-    const deleteButtonStyle: React.CSSProperties = {
-        position: 'absolute',
-        top: 8,
-        right: 8,
-        width: 24,
-        height: 24,
-        border: 'none',
-        background: 'transparent',
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 4,
-        color: '#8b8178',
-        opacity: isHovered && !collapsed ? 1 : 0,
-        transition: 'all 150ms ease',
-        padding: 0,
     };
 
     // Roman numeral conversion for chapter numbers (simplified)
@@ -223,6 +254,7 @@ export function ConversationItem({
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
                 onDoubleClick={handleDoubleClick}
+                onContextMenu={handleContextMenu}
                 role="button"
                 tabIndex={0}
                 aria-label={`${conversation.title}, ${conversation.message_count} messages, ${formatDate(conversation.updated_at)}`}
@@ -240,30 +272,138 @@ export function ConversationItem({
 
                 {!collapsed && (
                     <>
-                        <div style={titleContainerStyle}>
-                            {isEditing ? (
-                                <input
-                                    ref={inputRef}
-                                    type="text"
-                                    value={editValue}
-                                    onChange={(e) => setEditValue(e.target.value)}
-                                    onBlur={handleSave}
-                                    onKeyDown={handleKeyDown}
-                                    onClick={(e) => e.stopPropagation()}
-                                    style={inputStyle}
-                                    maxLength={100}
-                                    aria-label="Edit conversation title"
-                                />
-                            ) : (
-                                <span style={titleStyle} title={conversation.title}>
-                                    {conversation.title}
-                                </span>
-                            )}
+                        {/* Header row: title on left, actions on right - never overlap */}
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 8,
+                        }}>
+                            {/* Title area - takes remaining space, truncates */}
+                            <div style={{ ...titleContainerStyle, flex: 1, minWidth: 0 }}>
+                                {isEditing ? (
+                                    <input
+                                        ref={inputRef}
+                                        type="text"
+                                        value={editValue}
+                                        onChange={(e) => setEditValue(e.target.value)}
+                                        onBlur={handleSave}
+                                        onKeyDown={handleKeyDown}
+                                        onClick={(e) => e.stopPropagation()}
+                                        style={inputStyle}
+                                        maxLength={100}
+                                        aria-label="Edit conversation title"
+                                    />
+                                ) : (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                        {conversation.journey_id && (
+                                            <svg
+                                                width="14"
+                                                height="14"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke={theme.colors.accent}
+                                                strokeWidth="1.5"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                title="Guided Journey"
+                                                style={{ flexShrink: 0 }}
+                                            >
+                                                <circle cx="12" cy="12" r="10" />
+                                                <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+                                            </svg>
+                                        )}
+                                        <span style={titleStyle} title={conversation.title}>
+                                            {conversation.title}
+                                        </span>
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Action buttons - fixed width, appear on hover */}
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    gap: 2,
+                                    flexShrink: 0,
+                                    opacity: isHovered ? 1 : 0,
+                                    transition: 'opacity 150ms ease',
+                                    marginTop: -2,
+                                    marginRight: -4,
+                                }}
+                            >
+                                {/* Rename button */}
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setIsEditing(true);
+                                    }}
+                                    style={{
+                                        width: 22,
+                                        height: 22,
+                                        border: 'none',
+                                        background: 'transparent',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: 4,
+                                        color: theme.colors.textSecondary,
+                                        padding: 0,
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = theme.colors.accentSoft;
+                                        e.currentTarget.style.color = theme.colors.accent;
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'transparent';
+                                        e.currentTarget.style.color = theme.colors.textSecondary;
+                                    }}
+                                    aria-label="Rename conversation"
+                                    title="Rename"
+                                >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                    </svg>
+                                </button>
+                                {/* Delete button */}
+                                <button
+                                    onClick={handleDeleteClick}
+                                    style={{
+                                        width: 22,
+                                        height: 22,
+                                        border: 'none',
+                                        background: 'transparent',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderRadius: 4,
+                                        color: theme.colors.textSecondary,
+                                        padding: 0,
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = `rgba(196, 90, 74, ${isDark ? '0.2' : '0.1'})`;
+                                        e.currentTarget.style.color = theme.colors.error;
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'transparent';
+                                        e.currentTarget.style.color = theme.colors.textSecondary;
+                                    }}
+                                    aria-label="Delete conversation"
+                                    title="Delete"
+                                >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="3 6 5 6 21 6" />
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
 
                         <div style={metaStyle}>
                             <span>{conversation.message_count} {conversation.message_count === 1 ? 'entry' : 'entries'}</span>
-                            <span style={{ color: '#c4b5a8' }}>·</span>
+                            <span style={{ color: theme.colors.textMuted }}>·</span>
                             <span>{formatDate(conversation.updated_at)}</span>
                         </div>
 
@@ -272,37 +412,6 @@ export function ConversationItem({
                                 "{conversation.preview}"
                             </p>
                         )}
-
-                        <button
-                            style={deleteButtonStyle}
-                            onClick={handleDeleteClick}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.background = 'rgba(196, 90, 74, 0.1)';
-                                e.currentTarget.style.color = '#c45a4a';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.background = 'transparent';
-                                e.currentTarget.style.color = '#8b8178';
-                            }}
-                            aria-label="Delete conversation"
-                            title="Delete conversation"
-                        >
-                            <svg
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                            >
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                <line x1="10" y1="11" x2="10" y2="17" />
-                                <line x1="14" y1="11" x2="14" y2="17" />
-                            </svg>
-                        </button>
                     </>
                 )}
             </div>
@@ -316,6 +425,83 @@ export function ConversationItem({
                     }}
                     onCancel={() => setShowDeleteConfirm(false)}
                 />
+            )}
+
+            {/* Context Menu */}
+            {contextMenu.visible && (
+                <div
+                    ref={menuRef}
+                    style={{
+                        position: 'fixed',
+                        top: contextMenu.y,
+                        left: contextMenu.x,
+                        background: theme.colors.surface,
+                        borderRadius: 8,
+                        boxShadow: `0 4px 20px ${theme.colors.shadow}, 0 0 0 1px ${theme.colors.border}`,
+                        padding: '4px 0',
+                        minWidth: 160,
+                        zIndex: 1000,
+                        animation: 'menuFadeIn 100ms ease',
+                    }}
+                >
+                    <style>{`
+                        @keyframes menuFadeIn {
+                            from { opacity: 0; transform: scale(0.95); }
+                            to { opacity: 1; transform: scale(1); }
+                        }
+                    `}</style>
+                    <button
+                        onClick={handleRename}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            width: '100%',
+                            padding: '8px 14px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            fontFamily: 'system-ui, -apple-system, sans-serif',
+                            fontSize: 13,
+                            color: theme.colors.textPrimary,
+                            textAlign: 'left',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = theme.colors.accentSoft; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                        Rename
+                    </button>
+                    <div style={{ height: 1, background: theme.colors.border, margin: '4px 8px' }} />
+                    <button
+                        onClick={handleDeleteFromMenu}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            width: '100%',
+                            padding: '8px 14px',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            fontFamily: 'system-ui, -apple-system, sans-serif',
+                            fontSize: 13,
+                            color: theme.colors.error,
+                            textAlign: 'left',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = `rgba(196, 90, 74, ${isDark ? '0.15' : '0.08'})`; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                        Delete
+                    </button>
+                </div>
             )}
         </>
     );

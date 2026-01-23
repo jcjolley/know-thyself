@@ -3,16 +3,28 @@ import { TabNavigation } from "./components/TabNavigation";
 import { ChatPage } from "./components/ChatPage";
 import { ProfileView } from "./components/ProfileView";
 import { AdminPage } from "./components/AdminPage";
+import { JourneysPage } from "./components/JourneysPage";
+import { ApiKeySetup } from "./components/ApiKeySetup";
+import { SettingsPanel } from "./components/SettingsPanel";
 import {
   ConversationSidebar,
   type ConversationListItem,
 } from "./components/ConversationSidebar";
+import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
+import { ApiProvider, useApi } from "./contexts/ApiContext";
 import type { TabId } from "./components/TabNavigation";
+import type { ApiKeyStatus } from "../shared/types";
 
 const SIDEBAR_COLLAPSED_KEY = "know-thyself:sidebar-collapsed";
 
-export default function App() {
+function AppContent() {
+  const { theme } = useTheme();
+  const api = useApi();
   const [activeTab, setActiveTab] = useState<TabId>("chat");
+
+  // API Key state
+  const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Conversation state
   const [conversations, setConversations] = useState<ConversationListItem[]>(
@@ -27,15 +39,20 @@ export default function App() {
   });
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Admin tab only shows when window.api.admin exists (debug mode)
-  const showAdminTab = !!window.api.admin;
+  // Admin tab only shows when admin API exists (debug mode)
+  const showAdminTab = !!(api as unknown as { admin?: unknown }).admin;
+
+  // Check API key status on mount
+  useEffect(() => {
+    api.apiKey.getStatus().then(setApiKeyStatus);
+  }, [api]);
 
   // Load conversations on mount
   useEffect(() => {
     const loadConversations = async () => {
       try {
         const list =
-          (await window.api.conversations.list()) as ConversationListItem[];
+          (await api.conversations.list()) as ConversationListItem[];
         setConversations(list);
 
         // If no active conversation, select the most recent one or create new
@@ -47,7 +64,7 @@ export default function App() {
       }
     };
     loadConversations();
-  }, []);
+  }, [api]);
 
   // Keyboard shortcut: Ctrl/Cmd+P for profile
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -71,7 +88,7 @@ export default function App() {
   const handleNewConversation = useCallback(async () => {
     try {
       const newConv =
-        (await window.api.conversations.create()) as ConversationListItem;
+        (await api.conversations.create()) as ConversationListItem;
       setConversations((prev) => [
         { ...newConv, message_count: 0, preview: null },
         ...prev,
@@ -81,7 +98,7 @@ export default function App() {
     } catch (err) {
       console.error("Failed to create conversation:", err);
     }
-  }, []);
+  }, [api]);
 
   // Handler: Select conversation
   const handleSelectConversation = useCallback((id: string) => {
@@ -102,20 +119,20 @@ export default function App() {
   // Handler: Update conversation title
   const handleUpdateTitle = useCallback(async (id: string, title: string) => {
     try {
-      await window.api.conversations.updateTitle(id, title);
+      await api.conversations.updateTitle(id, title);
       setConversations((prev) =>
         prev.map((c) => (c.id === id ? { ...c, title } : c)),
       );
     } catch (err) {
       console.error("Failed to update title:", err);
     }
-  }, []);
+  }, [api]);
 
   // Handler: Delete conversation
   const handleDeleteConversation = useCallback(
     async (id: string) => {
       try {
-        await window.api.conversations.delete(id);
+        await api.conversations.delete(id);
         setConversations((prev) => prev.filter((c) => c.id !== id));
 
         // If deleted conversation was active, select another
@@ -131,7 +148,7 @@ export default function App() {
         console.error("Failed to delete conversation:", err);
       }
     },
-    [activeConversationId, conversations],
+    [api, activeConversationId, conversations],
   );
 
   // Handler: Conversation updated from ChatPage (new title, etc.)
@@ -143,24 +160,79 @@ export default function App() {
         );
       }
       // Refresh the conversation list to get updated preview/message count
-      window.api.conversations.list().then((list) => {
+      api.conversations.list().then((list) => {
         setConversations(list as ConversationListItem[]);
       });
     },
-    [],
+    [api],
   );
+
+  // Handler: Open settings
+  const handleOpenSettings = useCallback(() => {
+    setShowSettings(true);
+  }, []);
+
+  // Handler: Start a journey
+  const handleStartJourney = useCallback(async (journeyId: string) => {
+    try {
+      const result = await api.journeys.start(journeyId) as { conversationId: string; title: string; journeyId: string };
+
+      // Add the new conversation to the list
+      const newConv = {
+        id: result.conversationId,
+        title: result.title,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        message_count: 0,
+        preview: null,
+        journey_id: result.journeyId,
+      };
+      setConversations((prev) => [newConv, ...prev]);
+      setActiveConversationId(result.conversationId);
+      setActiveTab("chat");
+    } catch (err) {
+      console.error("Failed to start journey:", err);
+    }
+  }, [api]);
+
+  // Handler: API key setup complete
+  const handleApiKeySetupComplete = useCallback(() => {
+    api.apiKey.getStatus().then(setApiKeyStatus);
+  }, [api]);
 
   // Determine background color based on active tab
   const getBackgroundColor = () => {
     switch (activeTab) {
       case "admin":
-        return "#0a0e14";
-      case "profile":
-        return "#faf8f5";
+        return "#0a0e14"; // Admin has its own dark theme
       default:
-        return "#faf8f5";
+        return theme.colors.background;
     }
   };
+
+  // Show loading state while checking API key
+  if (apiKeyStatus === null) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100vh",
+          background: theme.colors.background,
+          fontFamily: "system-ui, -apple-system, sans-serif",
+          color: theme.colors.textMuted,
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
+
+  // Show setup screen if no API key is configured
+  if (!apiKeyStatus.hasKey) {
+    return <ApiKeySetup onComplete={handleApiKeySetupComplete} />;
+  }
 
   return (
     <div
@@ -175,7 +247,11 @@ export default function App() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         showAdminTab={showAdminTab}
+        onSettingsClick={handleOpenSettings}
       />
+      {showSettings && (
+        <SettingsPanel onClose={() => setShowSettings(false)} />
+      )}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* Conversation Sidebar - only show on chat tab */}
         {activeTab === "chat" && (
@@ -199,10 +275,21 @@ export default function App() {
               onConversationUpdated={handleConversationUpdated}
             />
           )}
+          {activeTab === "journeys" && <JourneysPage onStartJourney={handleStartJourney} />}
           {activeTab === "profile" && <ProfileView />}
           {activeTab === "admin" && <AdminPage />}
         </div>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <ApiProvider>
+        <AppContent />
+      </ApiProvider>
+    </ThemeProvider>
   );
 }

@@ -10,10 +10,12 @@ import {
     errorStyle,
     adminColors,
 } from '../styles/adminStyles';
+import { useApi } from '../contexts/ApiContext';
 
 type AdminTab = 'axes' | 'prompts';
 
 export function AdminPage() {
+    const api = useApi();
     const [activeTab, setActiveTab] = useState<AdminTab>('axes');
     const [data, setData] = useState<AdminProfileData | null>(null);
     const [prompts, setPrompts] = useState<MessageWithPrompt[]>([]);
@@ -27,9 +29,10 @@ export function AdminPage() {
         try {
             setLoading(true);
             setError(null);
+            const admin = (api as unknown as { admin?: typeof api.admin }).admin;
             const [profile, promptsData] = await Promise.all([
-                window.api.admin?.getProfile(),
-                window.api.admin?.getMessagesWithPrompts(50),
+                admin?.getProfile(),
+                admin?.getMessagesWithPrompts(50),
             ]);
             if (profile) {
                 setData(profile as AdminProfileData);
@@ -42,7 +45,7 @@ export function AdminPage() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [api]);
 
     useEffect(() => {
         loadData();
@@ -60,19 +63,21 @@ export function AdminPage() {
             }
         };
 
-        window.api.admin?.onReanalyzeProgress(handleProgress);
+        const admin = (api as unknown as { admin?: typeof api.admin }).admin;
+        admin?.onReanalyzeProgress(handleProgress);
 
         return () => {
-            window.api.admin?.removeReanalyzeProgressListener();
+            admin?.removeReanalyzeProgressListener();
         };
-    }, [loadData]);
+    }, [api, loadData]);
 
     const handleReanalyze = async () => {
         try {
             setIsReanalyzing(true);
             setError(null);
             setReanalyzeProgress(null);
-            await window.api.admin?.reanalyze();
+            const admin = (api as unknown as { admin?: typeof api.admin }).admin;
+            await admin?.reanalyze();
         } catch (err) {
             setIsReanalyzing(false);
             setError(err instanceof Error ? err.message : 'Re-analysis failed');

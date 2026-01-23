@@ -1,6 +1,7 @@
 import React from 'react';
 import { ConversationItem } from './ConversationItem';
 import type { ConversationListItem } from './ConversationSidebar';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface ConversationListProps {
     conversations: ConversationListItem[];
@@ -21,6 +22,8 @@ export function ConversationList({
     onUpdateTitle,
     onDelete,
 }: ConversationListProps) {
+    const { theme } = useTheme();
+
     const containerStyle: React.CSSProperties = {
         flex: 1,
         overflowY: 'auto',
@@ -45,21 +48,21 @@ export function ConversationList({
         width: 48,
         height: 48,
         marginBottom: 16,
-        color: 'rgba(139, 129, 120, 0.4)',
+        color: theme.colors.textMuted,
     };
 
     const emptyTitleStyle: React.CSSProperties = {
         fontFamily: 'Georgia, "Times New Roman", serif',
         fontSize: 15,
         fontWeight: 400,
-        color: '#6b6359',
+        color: theme.colors.textMuted,
         margin: '0 0 8px 0',
     };
 
     const emptyTextStyle: React.CSSProperties = {
         fontFamily: 'system-ui, -apple-system, sans-serif',
         fontSize: 13,
-        color: '#8b8178',
+        color: theme.colors.textSecondary,
         margin: 0,
         lineHeight: 1.5,
     };
@@ -122,7 +125,7 @@ export function ConversationList({
                         </svg>
                         <p style={{ ...emptyTextStyle, fontSize: 13 }}>
                             No chapters found for<br />
-                            "<span style={{ color: '#3d3630' }}>{searchQuery}</span>"
+                            "<span style={{ color: theme.colors.textPrimary }}>{searchQuery}</span>"
                         </p>
                     </div>
                 )}

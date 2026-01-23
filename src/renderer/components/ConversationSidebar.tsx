@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { ConversationList } from './ConversationList';
 import { ConversationSearch } from './ConversationSearch';
 import { NewConversationButton } from './NewConversationButton';
+import { useTheme } from '../contexts/ThemeContext';
 
 export interface ConversationListItem {
     id: string;
@@ -10,6 +11,7 @@ export interface ConversationListItem {
     updated_at: string;
     message_count: number;
     preview: string | null;
+    journey_id: string | null;
 }
 
 interface ConversationSidebarProps {
@@ -37,6 +39,8 @@ export function ConversationSidebar({
     onUpdateTitle,
     onDelete,
 }: ConversationSidebarProps) {
+    const { theme, isDark } = useTheme();
+
     // Keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -69,20 +73,22 @@ export function ConversationSidebar({
         width: collapsed ? 48 : 280,
         minWidth: collapsed ? 48 : 280,
         height: '100%',
-        background: 'linear-gradient(180deg, #f8f5f0 0%, #f5f2ed 100%)',
-        borderRight: '1px solid rgba(139, 129, 120, 0.2)',
+        background: isDark
+            ? theme.colors.background
+            : 'linear-gradient(180deg, #f8f5f0 0%, #f5f2ed 100%)',
+        borderRight: `1px solid ${theme.colors.border}`,
         display: 'flex',
         flexDirection: 'column',
         transition: 'width 200ms cubic-bezier(0.4, 0, 0.2, 1), min-width 200ms cubic-bezier(0.4, 0, 0.2, 1)',
         position: 'relative',
         overflow: 'hidden',
-        boxShadow: 'inset -1px 0 0 rgba(255, 255, 255, 0.5)',
+        boxShadow: isDark ? 'none' : 'inset -1px 0 0 rgba(255, 255, 255, 0.5)',
     };
 
     const headerStyle: React.CSSProperties = {
         padding: collapsed ? '12px 8px' : '16px',
-        borderBottom: '1px solid rgba(139, 129, 120, 0.15)',
-        background: 'rgba(255, 255, 255, 0.4)',
+        borderBottom: `1px solid ${theme.colors.border}`,
+        background: isDark ? theme.colors.surface : 'rgba(255, 255, 255, 0.4)',
         display: 'flex',
         flexDirection: 'column',
         gap: collapsed ? 8 : 12,
@@ -98,7 +104,7 @@ export function ConversationSidebar({
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: 6,
-        color: '#8b8178',
+        color: theme.colors.textSecondary,
         transition: 'all 150ms ease',
         alignSelf: collapsed ? 'center' : 'flex-end',
     };
@@ -107,7 +113,7 @@ export function ConversationSidebar({
         fontFamily: 'Georgia, "Times New Roman", serif',
         fontSize: 13,
         fontWeight: 400,
-        color: '#6b6359',
+        color: theme.colors.textMuted,
         letterSpacing: '0.08em',
         textTransform: 'uppercase',
         margin: 0,
@@ -130,7 +136,9 @@ export function ConversationSidebar({
         top: 0,
         bottom: 0,
         width: 3,
-        background: 'linear-gradient(90deg, transparent 0%, rgba(139, 129, 120, 0.08) 100%)',
+        background: isDark
+            ? 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.03) 100%)'
+            : 'linear-gradient(90deg, transparent 0%, rgba(139, 129, 120, 0.08) 100%)',
         pointerEvents: 'none',
     };
 
@@ -145,12 +153,12 @@ export function ConversationSidebar({
                         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                         title={collapsed ? 'Expand (Ctrl+B)' : 'Collapse (Ctrl+B)'}
                         onMouseEnter={(e) => {
-                            e.currentTarget.style.background = 'rgba(196, 149, 106, 0.12)';
-                            e.currentTarget.style.color = '#c4956a';
+                            e.currentTarget.style.background = theme.colors.accentSoft;
+                            e.currentTarget.style.color = theme.colors.accent;
                         }}
                         onMouseLeave={(e) => {
                             e.currentTarget.style.background = 'transparent';
-                            e.currentTarget.style.color = '#8b8178';
+                            e.currentTarget.style.color = theme.colors.textSecondary;
                         }}
                     >
                         <svg

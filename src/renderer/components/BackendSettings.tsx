@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useApi } from '../contexts/ApiContext';
 import { BackendCard } from './BackendCard';
 import { OllamaConfig } from './OllamaConfig';
 import type { LLMConfig, LLMStatus, OllamaModel, BackendType } from '../../shared/types';
@@ -10,6 +11,7 @@ interface BackendSettingsProps {
 
 export function BackendSettings({ onConfigChange }: BackendSettingsProps) {
   const { theme, isDark } = useTheme();
+  const api = useApi();
 
   const [config, setConfig] = useState<LLMConfig | null>(null);
   const [status, setStatus] = useState<LLMStatus | null>(null);
@@ -22,20 +24,20 @@ export function BackendSettings({ onConfigChange }: BackendSettingsProps) {
     const loadData = async () => {
       try {
         const [loadedConfig, loadedStatus] = await Promise.all([
-          window.api.llm.getConfig(),
-          window.api.llm.getStatus(),
+          api.llm.getConfig(),
+          api.llm.getStatus(),
         ]);
         setConfig(loadedConfig);
         setStatus(loadedStatus);
 
         // If Ollama backend, load models
         if (loadedConfig.backend === 'ollama') {
-          const loadedModels = await window.api.llm.listOllamaModels(loadedConfig.ollamaBaseUrl);
+          const loadedModels = await api.llm.listOllamaModels(loadedConfig.ollamaBaseUrl);
           setModels(loadedModels);
 
           // Auto-select first model if none selected
           if (loadedModels.length > 0 && !loadedConfig.ollamaModel) {
-            await window.api.llm.setConfig({ ollamaModel: loadedModels[0].name });
+            await api.llm.setConfig({ ollamaModel: loadedModels[0].name });
             setConfig((prev) => prev ? { ...prev, ollamaModel: loadedModels[0].name } : prev);
           }
         }
@@ -47,19 +49,19 @@ export function BackendSettings({ onConfigChange }: BackendSettingsProps) {
     };
 
     loadData();
-  }, []);
+  }, [api]);
 
   // Auto-test connection when backend changes
   const testConnection = useCallback(async () => {
     setChecking(true);
     try {
-      const result = await window.api.llm.testConnection();
-      const newStatus = await window.api.llm.getStatus();
+      const result = await api.llm.testConnection();
+      const newStatus = await api.llm.getStatus();
       setStatus(newStatus);
 
       // If Ollama connected, refresh models
       if (config?.backend === 'ollama' && result.ok) {
-        const loadedModels = await window.api.llm.listOllamaModels(config.ollamaBaseUrl);
+        const loadedModels = await api.llm.listOllamaModels(config.ollamaBaseUrl);
         setModels(loadedModels);
       }
     } catch (error) {
@@ -67,30 +69,30 @@ export function BackendSettings({ onConfigChange }: BackendSettingsProps) {
     } finally {
       setChecking(false);
     }
-  }, [config?.backend, config?.ollamaBaseUrl]);
+  }, [api, config?.backend, config?.ollamaBaseUrl]);
 
   // Handle backend selection
   const handleBackendSelect = useCallback(async (backend: BackendType) => {
     if (!config || backend === config.backend) return;
 
     try {
-      await window.api.llm.setConfig({ backend });
+      await api.llm.setConfig({ backend });
       setConfig((prev) => prev ? { ...prev, backend } : prev);
 
       // Test new backend connection
       setChecking(true);
-      const result = await window.api.llm.testConnection();
-      const newStatus = await window.api.llm.getStatus();
+      const result = await api.llm.testConnection();
+      const newStatus = await api.llm.getStatus();
       setStatus(newStatus);
 
       // If switching to Ollama, load models
       if (backend === 'ollama' && result.ok) {
-        const loadedModels = await window.api.llm.listOllamaModels(config.ollamaBaseUrl);
+        const loadedModels = await api.llm.listOllamaModels(config.ollamaBaseUrl);
         setModels(loadedModels);
 
         // Auto-select first model if needed
         if (loadedModels.length > 0 && !config.ollamaModel) {
-          await window.api.llm.setConfig({ ollamaModel: loadedModels[0].name });
+          await api.llm.setConfig({ ollamaModel: loadedModels[0].name });
           setConfig((prev) => prev ? { ...prev, ollamaModel: loadedModels[0].name } : prev);
         }
       }
@@ -101,14 +103,14 @@ export function BackendSettings({ onConfigChange }: BackendSettingsProps) {
     } finally {
       setChecking(false);
     }
-  }, [config, onConfigChange]);
+  }, [api, config, onConfigChange]);
 
   // Handle Ollama URL change
   const handleBaseUrlChange = useCallback(async (url: string) => {
     if (!config) return;
 
     try {
-      await window.api.llm.setConfig({ ollamaBaseUrl: url });
+      await api.llm.setConfig({ ollamaBaseUrl: url });
       setConfig((prev) => prev ? { ...prev, ollamaBaseUrl: url } : prev);
 
       // Test connection with new URL
@@ -117,32 +119,32 @@ export function BackendSettings({ onConfigChange }: BackendSettingsProps) {
     } catch (error) {
       console.error('Failed to update base URL:', error);
     }
-  }, [config, testConnection, onConfigChange]);
+  }, [api, config, testConnection, onConfigChange]);
 
   // Handle model selection
   const handleModelSelect = useCallback(async (model: string) => {
     if (!config) return;
 
     try {
-      await window.api.llm.setConfig({ ollamaModel: model });
+      await api.llm.setConfig({ ollamaModel: model });
       setConfig((prev) => prev ? { ...prev, ollamaModel: model } : prev);
       onConfigChange?.();
     } catch (error) {
       console.error('Failed to select model:', error);
     }
-  }, [config, onConfigChange]);
+  }, [api, config, onConfigChange]);
 
   // Refresh models
   const handleRefreshModels = useCallback(async () => {
     if (!config) return;
 
     try {
-      const loadedModels = await window.api.llm.listOllamaModels(config.ollamaBaseUrl);
+      const loadedModels = await api.llm.listOllamaModels(config.ollamaBaseUrl);
       setModels(loadedModels);
     } catch (error) {
       console.error('Failed to refresh models:', error);
     }
-  }, [config]);
+  }, [api, config]);
 
   if (loading || !config) {
     return (

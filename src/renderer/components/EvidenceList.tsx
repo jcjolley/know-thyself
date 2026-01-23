@@ -7,32 +7,34 @@ import {
     evidenceIdStyle,
     adminColors,
 } from '../styles/adminStyles';
+import { useApi } from '../contexts/ApiContext';
 
 interface EvidenceListProps {
     dimension: string;
 }
 
 export function EvidenceList({ dimension }: EvidenceListProps) {
+    const api = useApi();
     const [evidence, setEvidence] = useState<SignalEvidence[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        loadEvidence();
-    }, [dimension]);
-
-    const loadEvidence = async () => {
-        try {
-            setLoading(true);
-            const result = await window.api.admin?.getEvidence(dimension);
-            if (result) {
-                setEvidence(result as SignalEvidence[]);
+        const loadEvidence = async () => {
+            try {
+                setLoading(true);
+                const admin = (api as unknown as { admin?: typeof api.admin }).admin;
+                const result = await admin?.getEvidence(dimension);
+                if (result) {
+                    setEvidence(result as SignalEvidence[]);
+                }
+            } catch (err) {
+                console.error('Failed to load evidence:', err);
+            } finally {
+                setLoading(false);
             }
-        } catch (err) {
-            console.error('Failed to load evidence:', err);
-        } finally {
-            setLoading(false);
-        }
-    };
+        };
+        loadEvidence();
+    }, [api, dimension]);
 
     if (loading) {
         return (

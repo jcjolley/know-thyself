@@ -3,6 +3,7 @@ import { ApiKeySetup } from './ApiKeySetup';
 import { BackendSettings } from './BackendSettings';
 import type { ApiKeyStatus, LLMConfig } from '../../shared/types';
 import { useTheme, type ThemeMode } from '../contexts/ThemeContext';
+import { useApi } from '../contexts/ApiContext';
 
 interface SettingsPanelProps {
     onClose: () => void;
@@ -10,6 +11,7 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const { theme, isDark, mode, setMode } = useTheme();
+    const api = useApi();
     const [status, setStatus] = useState<ApiKeyStatus | null>(null);
     const [llmConfig, setLlmConfig] = useState<LLMConfig | null>(null);
     const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -17,15 +19,20 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
     // Load status on mount
     useEffect(() => {
-        window.api.apiKey.getStatus().then(setStatus);
-        window.api.llm.getConfig().then(setLlmConfig);
+        api.apiKey.getStatus().then(setStatus);
+        api.llm.getConfig().then(setLlmConfig);
         requestAnimationFrame(() => setIsVisible(true));
-    }, []);
+    }, [api]);
 
     // Refresh LLM config when backend changes
     const handleBackendConfigChange = useCallback(() => {
-        window.api.llm.getConfig().then(setLlmConfig);
-    }, []);
+        api.llm.getConfig().then(setLlmConfig);
+    }, [api]);
+
+    const handleClose = useCallback(() => {
+        setIsVisible(false);
+        setTimeout(onClose, 150);
+    }, [onClose]);
 
     // Handle escape key
     useEffect(() => {
@@ -36,24 +43,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         };
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [showUpdateModal]);
-
-    const handleClose = useCallback(() => {
-        setIsVisible(false);
-        setTimeout(onClose, 150);
-    }, [onClose]);
+    }, [showUpdateModal, handleClose]);
 
     const handleClearKey = useCallback(async () => {
         if (confirm('Are you sure you want to remove your API key? You will need to enter it again to use the app.')) {
-            await window.api.apiKey.clear();
-            setStatus(await window.api.apiKey.getStatus());
+            await api.apiKey.clear();
+            setStatus(await api.apiKey.getStatus());
         }
-    }, []);
+    }, [api]);
 
     const handleUpdateComplete = useCallback(async () => {
         setShowUpdateModal(false);
-        setStatus(await window.api.apiKey.getStatus());
-    }, []);
+        setStatus(await api.apiKey.getStatus());
+    }, [api]);
 
     const overlayStyle: React.CSSProperties = {
         position: 'fixed',

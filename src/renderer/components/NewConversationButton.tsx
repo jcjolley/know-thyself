@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface NewConversationButtonProps {
     onClick: () => void;
@@ -6,8 +7,13 @@ interface NewConversationButtonProps {
 }
 
 export function NewConversationButton({ onClick, collapsed }: NewConversationButtonProps) {
+    const { theme } = useTheme();
     const [isHovered, setIsHovered] = useState(false);
     const [isPressed, setIsPressed] = useState(false);
+
+    const accentColor = theme.colors.accent;
+    const accentDarker = theme.name === 'dark' ? '#c4956a' : '#b8875f';
+    const accentLighter = theme.name === 'dark' ? '#e0b68a' : '#d4a574';
 
     const buttonStyle: React.CSSProperties = {
         width: '100%',
@@ -15,10 +21,10 @@ export function NewConversationButton({ onClick, collapsed }: NewConversationBut
         border: 'none',
         borderRadius: 8,
         background: isPressed
-            ? 'linear-gradient(135deg, #b8875f 0%, #a67a55 100%)'
+            ? `linear-gradient(135deg, ${accentDarker} 0%, #a67a55 100%)`
             : isHovered
-            ? 'linear-gradient(135deg, #d4a574 0%, #c4956a 100%)'
-            : 'linear-gradient(135deg, #c4956a 0%, #b8875f 100%)',
+            ? `linear-gradient(135deg, ${accentLighter} 0%, ${accentColor} 100%)`
+            : `linear-gradient(135deg, ${accentColor} 0%, ${accentDarker} 100%)`,
         color: '#fff',
         cursor: 'pointer',
         display: 'flex',
@@ -31,8 +37,8 @@ export function NewConversationButton({ onClick, collapsed }: NewConversationBut
         letterSpacing: '0.01em',
         transition: 'all 150ms ease',
         boxShadow: isHovered
-            ? '0 4px 12px rgba(196, 149, 106, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2)'
-            : '0 2px 6px rgba(196, 149, 106, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+            ? `0 4px 12px ${theme.colors.accentSoft}, inset 0 1px 0 rgba(255, 255, 255, 0.2)`
+            : `0 2px 6px ${theme.colors.accentSoft}, inset 0 1px 0 rgba(255, 255, 255, 0.15)`,
         transform: isPressed ? 'scale(0.98)' : 'scale(1)',
     };
 

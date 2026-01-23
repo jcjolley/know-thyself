@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from './db/sqlite.js';
+import { llmManager } from './llm/manager.js';
 import { searchSimilarMessages } from './db/lancedb.js';
 import { embed, isEmbeddingsReady } from './embeddings.js';
 import {
@@ -15,10 +15,14 @@ import {
 } from './prompts/context-planning.js';
 import { isMockEnabled, getMockContextPlan } from './claude-mock.js';
 import type { Message, Value, Challenge, MaslowSignal, Goal } from '../shared/types.js';
+import { processUserMessageForGuidedMode, getGuidedModeState } from './guided-onboarding.js';
+import { getRandomQuestionForAxis } from './question-bank.js';
+import type { AxisName } from './completeness.js';
+import { getJourney, type JourneyInfo } from './journeys.js';
+import { getConversationById } from './db/conversations.js';
 
 // Minimum confidence to include a signal in context
 const MIN_CONFIDENCE = 0.5;
-const PLANNING_MODEL = 'claude-haiku-4-5';
 
 export interface AssembledContext {
     profileSummary: string;
@@ -29,6 +33,15 @@ export interface AssembledContext {
     supportStyle: string | null;
     currentIntent: string | null;
     questionType: string | null;
+    // Guided mode information
+    guidedMode: {
+        isActive: boolean;
+        suggestedQuestion: string | null;
+        targetAxis: string | null;
+        turnCount: number;
+    };
+    // Journey information (if this is a journey conversation)
+    journey: JourneyInfo | null;
 }
 
 /**
@@ -45,22 +58,18 @@ async function planContext(
             console.log('[context] Using mock context plan');
             jsonStr = getMockContextPlan();
         } else {
-            console.log('[context] Planning context with Haiku...');
-            const client = new Anthropic();
+            const provider = llmManager.getProvider();
+            console.log('[context] Planning context with', provider.name, '...');
             const prompt = buildContextPlanningPrompt({
                 userQuestion,
                 profileSummary: briefProfile,
             });
 
-            const response = await client.messages.create({
-                model: PLANNING_MODEL,
-                max_tokens: 500,
-                messages: [{ role: 'user', content: prompt }],
-            });
-
-            const rawResponse = response.content[0].type === 'text'
-                ? response.content[0].text
-                : '';
+            const rawResponse = await provider.generateText(
+                [{ role: 'user', content: prompt }],
+                undefined,
+                { maxTokens: 500 }
+            );
 
             // Strip markdown fences if present
             jsonStr = rawResponse
@@ -111,6 +120,34 @@ export async function assembleContext(
     conversationId: string
 ): Promise<AssembledContext> {
     const db = getDb();
+
+    // Step 0a: Check if this is a journey conversation
+    const conversation = getConversationById(conversationId);
+    let journey: JourneyInfo | null = null;
+    if (conversation?.journey_id) {
+        journey = getJourney(conversation.journey_id);
+        if (journey) {
+            console.log(`[context] Journey conversation detected: ${journey.id}`);
+        }
+    }
+
+    // Step 0b: Process guided mode (skip for journey conversations)
+    let guidedModeResult: { isGuidedMode: boolean; suggestedAxis: string | null } = { isGuidedMode: false, suggestedAxis: null };
+    let guidedModeTurnCount = 0;
+    let suggestedQuestion: string | null = null;
+
+    if (!journey) {
+        // Only use guided onboarding for non-journey conversations
+        guidedModeResult = processUserMessageForGuidedMode(conversationId, currentMessage);
+        const guidedModeState = getGuidedModeState(conversationId);
+        guidedModeTurnCount = guidedModeState.turnCount;
+
+        // Get suggested question if in guided mode
+        if (guidedModeResult.isGuidedMode && guidedModeResult.suggestedAxis) {
+            const question = getRandomQuestionForAxis(guidedModeResult.suggestedAxis as AxisName);
+            suggestedQuestion = question?.question ?? null;
+        }
+    }
 
     // Step 1: Get brief profile for planning
     const briefProfile = getBriefProfileForPlanning();
@@ -203,6 +240,13 @@ export async function assembleContext(
         supportStyle: supportStyle?.style || null,
         currentIntent: currentIntent?.type || null,
         questionType: plan?.question_type || null,
+        guidedMode: {
+            isActive: guidedModeResult.isGuidedMode,
+            suggestedQuestion,
+            targetAxis: guidedModeResult.suggestedAxis,
+            turnCount: guidedModeTurnCount,
+        },
+        journey,
     };
 }
 
