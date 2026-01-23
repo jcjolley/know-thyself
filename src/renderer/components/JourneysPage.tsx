@@ -534,8 +534,8 @@ function JourneyDetail({ journey, onClose, onStart, isStarting, styles }: Journe
                                 {/* Animated dots */}
                                 <div style={styles.loadingDots}>
                                     <span style={{ ...styles.loadingDot, animationDelay: '0s' }} />
-                                    <span style={{ ...styles.loadingDot, animationDelay: '0.15s' }} />
                                     <span style={{ ...styles.loadingDot, animationDelay: '0.3s' }} />
+                                    <span style={{ ...styles.loadingDot, animationDelay: '0.6s' }} />
                                 </div>
                                 {/* Rotating message */}
                                 <span
@@ -916,7 +916,7 @@ function getStyles(theme: Theme, isDark: boolean): Record<string, React.CSSPrope
             height: 6,
             borderRadius: '50%',
             background: 'rgba(255, 255, 255, 0.9)',
-            animation: 'dotPulse 1.2s ease-in-out infinite',
+            animation: 'dotPulse 2.4s ease-in-out infinite',
         },
         loadingMessage: {
             fontSize: 15,
