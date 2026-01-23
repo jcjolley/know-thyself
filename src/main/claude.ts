@@ -82,7 +82,7 @@ export async function generateResponse(
     return await provider.generateText(
         [{ role: 'user', content: prompts.user }],
         prompts.system,
-        { maxTokens: 4096 }
+        { maxTokens: 8192 }
     );
 }
 
@@ -101,7 +101,7 @@ export async function* streamResponse(
     yield* provider.streamText(
         [{ role: 'user', content: prompts.user }],
         prompts.system,
-        { maxTokens: 4096 }
+        { maxTokens: 8192 }
     );
 }
 
@@ -128,7 +128,7 @@ export async function generateJourneyOpening(
     const result = await provider.generateText(
         [{ role: 'user', content: prompt }],
         undefined,
-        { maxTokens: 500 }
+        { maxTokens: 8192 }
     );
 
     // Ensure we don't return empty content

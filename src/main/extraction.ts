@@ -53,7 +53,7 @@ export async function runExtraction(messageId: string, conversationId: string): 
             const rawResponse = await provider.generateText(
                 [{ role: 'user', content: buildExtractionPrompt(message.content) }],
                 undefined,
-                { maxTokens: 2000 }
+                { maxTokens: 8192 }
             );
 
             console.log('[extraction] Response length:', rawResponse.length);
@@ -457,7 +457,7 @@ async function callLLMForNarrative(prompt: string): Promise<string> {
             return await provider.generateText(
                 [{ role: 'user', content: prompt }],
                 undefined,
-                { maxTokens: 1000 }
+                { maxTokens: 8192 }
             );
         } catch (err) {
             lastError = err as Error;

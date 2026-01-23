@@ -68,7 +68,7 @@ async function planContext(
             const rawResponse = await provider.generateText(
                 [{ role: 'user', content: prompt }],
                 undefined,
-                { maxTokens: 1500 }  // Increased for local models that need more tokens
+                { maxTokens: 8192 }
             );
 
             // Strip markdown fences if present
