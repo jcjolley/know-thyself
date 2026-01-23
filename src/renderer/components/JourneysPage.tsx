@@ -437,8 +437,8 @@ function JourneyDetail({ journey, onClose, onStart, isStarting, styles }: Journe
                         prev < LOADING_MESSAGES.length - 1 ? prev + 1 : prev
                     );
                     setIsMessageVisible(true);
-                }, 200);
-            }, 2500);
+                }, 600);
+            }, 4500);
 
             return () => {
                 if (intervalRef.current) {
@@ -878,6 +878,7 @@ function getStyles(theme: Theme, isDark: boolean): Record<string, React.CSSPrope
             lineHeight: 1.6,
         },
         startButton: {
+            position: 'relative',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -900,9 +901,12 @@ function getStyles(theme: Theme, isDark: boolean): Record<string, React.CSSPrope
         loadingContainer: {
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
+            justifyContent: 'center',
+            width: '100%',
         },
         loadingDots: {
+            position: 'absolute',
+            left: 24,
             display: 'flex',
             alignItems: 'center',
             gap: 4,
@@ -919,7 +923,7 @@ function getStyles(theme: Theme, isDark: boolean): Record<string, React.CSSPrope
             fontWeight: 500,
             fontStyle: 'italic',
             letterSpacing: '0.01em',
-            transition: 'opacity 0.2s ease, transform 0.2s ease',
+            transition: 'opacity 0.6s ease, transform 0.6s ease',
         },
     };
 }
