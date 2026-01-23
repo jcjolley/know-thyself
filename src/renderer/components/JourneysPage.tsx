@@ -431,14 +431,14 @@ function JourneyDetail({ journey, onClose, onStart, isStarting, styles }: Journe
                 // Fade out
                 setIsMessageVisible(false);
 
-                // After fade out, change message and fade in
+                // After fade out completes, change message and fade in
                 setTimeout(() => {
                     setLoadingMessageIndex(prev =>
                         prev < LOADING_MESSAGES.length - 1 ? prev + 1 : prev
                     );
                     setIsMessageVisible(true);
-                }, 600);
-            }, 4500);
+                }, 1200);
+            }, 6000);
 
             return () => {
                 if (intervalRef.current) {
@@ -542,7 +542,7 @@ function JourneyDetail({ journey, onClose, onStart, isStarting, styles }: Journe
                                     style={{
                                         ...styles.loadingMessage,
                                         opacity: isMessageVisible ? 1 : 0,
-                                        transform: isMessageVisible ? 'translateY(0)' : 'translateY(-4px)',
+                                        transform: isMessageVisible ? 'translateY(0)' : 'translateY(-6px)',
                                     }}
                                 >
                                     {currentLoadingMessage}
@@ -923,7 +923,7 @@ function getStyles(theme: Theme, isDark: boolean): Record<string, React.CSSPrope
             fontWeight: 500,
             fontStyle: 'italic',
             letterSpacing: '0.01em',
-            transition: 'opacity 0.6s ease, transform 0.6s ease',
+            transition: 'opacity 1.2s ease-in-out, transform 1.2s ease-in-out',
         },
     };
 }
