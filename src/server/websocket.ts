@@ -61,6 +61,11 @@ export function setupWebSocket(wss: WebSocketServer): void {
             }
 
             if (message.type === 'chat:stream') {
+                // Validate content is not empty
+                if (!message.content || message.content.trim().length === 0) {
+                    ws.send(JSON.stringify({ type: 'chat:error', error: 'Message content cannot be empty' }));
+                    return;
+                }
                 await handleChatStream(ws, message);
             }
         });

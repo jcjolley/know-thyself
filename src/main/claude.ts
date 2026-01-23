@@ -237,25 +237,35 @@ export async function generateJourneyOpening(
         profileSummary
     );
 
+    let result: string;
+
     // Use LLM manager if available (supports Ollama and Claude)
     if (shouldUseLLMManager()) {
         const provider = llmManager.getProvider();
-        return await provider.generateText(
+        result = await provider.generateText(
             [{ role: 'user', content: prompt }],
             undefined,
             { maxTokens: 500 }
         );
+    } else {
+        // Fallback to direct Anthropic SDK (legacy)
+        const anthropic = getClient();
+
+        const response = await anthropic.messages.create({
+            model: RESPONSE_MODEL,
+            max_tokens: 500,
+            messages: [{ role: 'user', content: prompt }],
+        });
+
+        const textBlock = response.content.find(block => block.type === 'text');
+        result = textBlock?.text || '';
     }
 
-    // Fallback to direct Anthropic SDK (legacy)
-    const anthropic = getClient();
+    // Ensure we don't return empty content
+    if (!result || result.trim().length === 0) {
+        console.warn('[claude] Journey opening returned empty, using fallback');
+        return `Welcome to "${journey.title}". I'm looking forward to exploring this topic with you. What draws you to this area of reflection?`;
+    }
 
-    const response = await anthropic.messages.create({
-        model: RESPONSE_MODEL,
-        max_tokens: 500,
-        messages: [{ role: 'user', content: prompt }],
-    });
-
-    const textBlock = response.content.find(block => block.type === 'text');
-    return textBlock ? textBlock.text : '';
+    return result;
 }
