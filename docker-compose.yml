@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   know-thyself:
-    image: jcjolley/know-thyself:latest
+    image: jolleyboy/know-thyself:latest
     build:
       context: .
       dockerfile: Dockerfile
