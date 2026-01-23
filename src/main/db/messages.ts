@@ -48,8 +48,8 @@ export async function saveMessage(
         UPDATE conversations SET updated_at = ? WHERE id = ?
     `).run(now, conversationId);
 
-    // Embed and store in LanceDB (only if embeddings are ready)
-    if (isEmbeddingsReady()) {
+    // Embed and store in LanceDB (only if embeddings are ready and content is non-empty)
+    if (isEmbeddingsReady() && content && content.trim().length > 0) {
         try {
             const vector = await embed(content, 'document');
             await addMessageEmbedding({
