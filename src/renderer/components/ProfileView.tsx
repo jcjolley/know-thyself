@@ -1,23 +1,35 @@
 import { useState, useEffect } from 'react';
 import { ProfileSummary } from './ProfileSummary';
 import type { FullProfileSummary } from '../../shared/types';
-
-// CSS Variables for the warm, contemplative theme
-const cssVars = {
-    '--portrait-bg': '#faf8f5',
-    '--portrait-card': '#ffffff',
-    '--portrait-border': '#e8e4de',
-    '--portrait-text': '#3d3830',
-    '--portrait-text-muted': '#7a7267',
-    '--portrait-accent': '#c4956a',
-    '--portrait-accent-soft': '#f5ede4',
-    '--portrait-success': '#7d9e7a',
-    '--portrait-warning': '#d4a574',
-    '--portrait-shadow': '0 2px 8px rgba(61, 56, 48, 0.08)',
-    '--portrait-shadow-hover': '0 4px 16px rgba(61, 56, 48, 0.12)',
-} as React.CSSProperties;
+import { useTheme } from '../contexts/ThemeContext';
+import { useApi } from '../contexts/ApiContext';
 
 export function ProfileView() {
+    const { theme, isDark } = useTheme();
+    const api = useApi();
+
+    // CSS Variables derived from theme
+    const cssVars = {
+        '--portrait-bg': theme.colors.background,
+        '--portrait-card': theme.colors.surface,
+        '--portrait-card-inner': isDark ? '#2a2724' : '#fdfcfa',
+        '--portrait-card-inner-alt': isDark ? '#2f2b28' : '#f9f7f4',
+        '--portrait-border': theme.colors.border,
+        '--portrait-text': theme.colors.textPrimary,
+        '--portrait-text-muted': theme.colors.textSecondary,
+        '--portrait-accent': theme.colors.accent,
+        '--portrait-accent-soft': theme.colors.accentSoft,
+        '--portrait-success': theme.colors.success,
+        '--portrait-success-soft': isDark ? 'rgba(143, 184, 138, 0.15)' : '#e8f5e9',
+        '--portrait-warning': theme.colors.accent,
+        '--portrait-warning-soft': isDark ? 'rgba(212, 165, 116, 0.15)' : '#fef3e6',
+        '--portrait-maslow-soft': isDark ? 'rgba(212, 165, 116, 0.1)' : '#fdf8f4',
+        '--portrait-badge-bg': isDark ? '#3a3632' : '#f5f3f0',
+        '--portrait-badge-text': isDark ? '#a09890' : '#8b8178',
+        '--portrait-confidence-bg': isDark ? '#3a3632' : '#f0ebe4',
+        '--portrait-shadow': `0 2px 8px ${theme.colors.shadow}`,
+        '--portrait-shadow-hover': `0 4px 16px ${theme.colors.shadow}`,
+    } as React.CSSProperties;
     const [summary, setSummary] = useState<FullProfileSummary | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -26,7 +38,7 @@ export function ProfileView() {
         const loadProfile = async () => {
             try {
                 setIsLoading(true);
-                const data = await window.api.profile.getSummary() as FullProfileSummary;
+                const data = await api.profile.getSummary() as FullProfileSummary;
                 setSummary(data);
             } catch (err) {
                 console.error('Failed to load profile:', err);
@@ -37,7 +49,7 @@ export function ProfileView() {
         };
 
         loadProfile();
-    }, []);
+    }, [api]);
 
     return (
         <div style={{
@@ -111,10 +123,10 @@ export function ProfileView() {
                 {error && !isLoading && (
                     <div style={{
                         padding: 24,
-                        background: '#fdf6f3',
-                        border: '1px solid #e8d4cc',
+                        background: isDark ? 'rgba(196, 90, 74, 0.1)' : '#fdf6f3',
+                        border: `1px solid ${isDark ? 'rgba(196, 90, 74, 0.3)' : '#e8d4cc'}`,
                         borderRadius: 12,
-                        color: '#8b5a42',
+                        color: theme.colors.error,
                         animation: 'fadeIn 0.3s ease-out',
                     }}>
                         <p style={{ margin: 0, fontSize: 14 }}>{error}</p>

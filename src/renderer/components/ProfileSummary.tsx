@@ -291,7 +291,7 @@ export function ProfileSummary({ summary }: ProfileSummaryProps) {
                                 key={i}
                                 style={{
                                     padding: '8px 14px',
-                                    background: '#f8f6f3',
+                                    background: 'var(--portrait-badge-bg)',
                                     borderRadius: 8,
                                     fontSize: 14,
                                     color: 'var(--portrait-text)',
@@ -333,7 +333,7 @@ export function ProfileSummary({ summary }: ProfileSummaryProps) {
                                     alignItems: 'center',
                                     gap: 10,
                                     padding: '10px 14px',
-                                    background: '#fdf8f4',
+                                    background: 'var(--portrait-maslow-soft)',
                                     borderRadius: 8,
                                     borderLeft: '3px solid var(--portrait-warning)',
                                 }}
@@ -573,8 +573,8 @@ function CollapsibleSection({ title, icon, count, isExpanded, onToggle, animatio
                     </span>
                     <span style={{
                         fontSize: 12,
-                        color: 'var(--portrait-text-muted)',
-                        background: '#f5f3f0',
+                        color: 'var(--portrait-badge-text)',
+                        background: 'var(--portrait-badge-bg)',
                         padding: '3px 10px',
                         borderRadius: 12,
                         fontWeight: 500,
@@ -619,7 +619,7 @@ function ValueCard({ value, index }: { value: ProfileValueItem; index: number })
             flexDirection: 'column',
             gap: 8,
             padding: '14px 16px',
-            background: 'linear-gradient(135deg, #fdfcfa 0%, #f9f7f4 100%)',
+            background: 'linear-gradient(135deg, var(--portrait-card-inner) 0%, var(--portrait-card-inner-alt) 100%)',
             borderRadius: 10,
             borderLeft: '3px solid var(--portrait-accent)',
             animation: `fadeIn 0.3s ease-out ${index * 0.05}s both`,
@@ -652,9 +652,9 @@ function ValueCard({ value, index }: { value: ProfileValueItem; index: number })
 // Challenge Card Component
 function ChallengeCard({ challenge, index }: { challenge: ProfileChallengeItem; index: number }) {
     const statusColors: Record<string, { bg: string; text: string }> = {
-        'active': { bg: '#fef3e6', text: '#c4956a' },
-        'resolved': { bg: '#e8f5e9', text: '#7d9e7a' },
-        'recurring': { bg: '#fff3e0', text: '#e65100' },
+        'active': { bg: 'var(--portrait-warning-soft)', text: 'var(--portrait-accent)' },
+        'resolved': { bg: 'var(--portrait-success-soft)', text: 'var(--portrait-success)' },
+        'recurring': { bg: 'var(--portrait-warning-soft)', text: 'var(--portrait-warning)' },
     };
     const colors = statusColors[challenge.status] || statusColors.active;
 
@@ -665,7 +665,7 @@ function ChallengeCard({ challenge, index }: { challenge: ProfileChallengeItem; 
             justifyContent: 'space-between',
             gap: 12,
             padding: '12px 14px',
-            background: '#fdfcfa',
+            background: 'var(--portrait-card-inner)',
             borderRadius: 8,
             animation: `fadeIn 0.3s ease-out ${index * 0.05}s both`,
         }}>
@@ -698,10 +698,10 @@ function ChallengeCard({ challenge, index }: { challenge: ProfileChallengeItem; 
 // Goal Card Component
 function GoalCard({ goal, index }: { goal: ProfileGoalItem; index: number }) {
     const statusColors: Record<string, { bg: string; text: string }> = {
-        'stated': { bg: '#f5f3f0', text: '#8b8178' },
-        'in_progress': { bg: '#e3f2fd', text: '#1976d2' },
-        'achieved': { bg: '#e8f5e9', text: '#7d9e7a' },
-        'abandoned': { bg: '#fafafa', text: '#9e9e9e' },
+        'stated': { bg: 'var(--portrait-badge-bg)', text: 'var(--portrait-badge-text)' },
+        'in_progress': { bg: 'var(--portrait-accent-soft)', text: 'var(--portrait-accent)' },
+        'achieved': { bg: 'var(--portrait-success-soft)', text: 'var(--portrait-success)' },
+        'abandoned': { bg: 'var(--portrait-badge-bg)', text: 'var(--portrait-text-muted)' },
     };
     const colors = statusColors[goal.status] || statusColors.stated;
 
@@ -711,7 +711,7 @@ function GoalCard({ goal, index }: { goal: ProfileGoalItem; index: number }) {
             flexDirection: 'column',
             gap: 8,
             padding: '12px 14px',
-            background: '#fdfcfa',
+            background: 'var(--portrait-card-inner)',
             borderRadius: 8,
             animation: `fadeIn 0.3s ease-out ${index * 0.05}s both`,
         }}>
@@ -742,8 +742,8 @@ function GoalCard({ goal, index }: { goal: ProfileGoalItem; index: number }) {
                         fontWeight: 500,
                         padding: '4px 10px',
                         borderRadius: 12,
-                        background: '#f5f3f0',
-                        color: '#8b8178',
+                        background: 'var(--portrait-badge-bg)',
+                        color: 'var(--portrait-badge-text)',
                         letterSpacing: '0.02em',
                     }}>
                         {formatTimeframe(goal.timeframe)}
@@ -764,7 +764,7 @@ function SignalCard({ signal, index }: { signal: ProfileSignalItem; index: numbe
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '12px 14px',
-            background: '#fdfcfa',
+            background: 'var(--portrait-card-inner)',
             borderRadius: 8,
             animation: `fadeIn 0.3s ease-out ${index * 0.05}s both`,
         }}>
@@ -825,7 +825,7 @@ function ConfidenceIndicator({ confidence }: { confidence: number }) {
             <div style={{
                 width: 40,
                 height: 4,
-                background: '#f0ebe4',
+                background: 'var(--portrait-confidence-bg)',
                 borderRadius: 2,
                 overflow: 'hidden',
             }}>
@@ -880,7 +880,7 @@ function EmptyState() {
                 width: 80,
                 height: 80,
                 margin: '0 auto 24px',
-                background: 'linear-gradient(135deg, var(--portrait-accent-soft) 0%, #f5f0e8 100%)',
+                background: 'linear-gradient(135deg, var(--portrait-accent-soft) 0%, var(--portrait-card-inner-alt) 100%)',
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',

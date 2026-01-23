@@ -517,32 +517,53 @@ export function setupRoutes(app: Express): void {
     });
 
     // ==========================================================================
-    // Admin/Debug (development only)
+    // Admin (profile introspection)
+    // ==========================================================================
+
+    router.get('/admin/profile', (_req: Request, res: Response) => {
+        try {
+            const db = getDb();
+            const signals = getAllSignalsForAdmin();
+            const values = db.prepare(`SELECT * FROM user_values ORDER BY confidence DESC`).all() as Value[];
+            const challenges = db.prepare(`SELECT * FROM challenges ORDER BY mention_count DESC`).all() as Challenge[];
+            const goals = getAllGoals();
+            const maslowSignals = db.prepare(`SELECT * FROM maslow_signals ORDER BY created_at DESC`).all() as MaslowSignal[];
+            res.json({ signals, values, challenges, goals, maslowSignals });
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    router.get('/admin/evidence/:dimension', (req: Request, res: Response) => {
+        try {
+            res.json(getEvidenceForDimension(getParam(req.params, 'dimension')));
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    router.get('/admin/messages-with-prompts', (req: Request, res: Response) => {
+        try {
+            const limit = parseInt(req.query.limit as string) || 50;
+            const db = getDb();
+            const messages = db.prepare(`
+                SELECT id, conversation_id, role, content, prompt, created_at
+                FROM messages
+                WHERE role = 'assistant' AND prompt IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT ?
+            `).all(limit);
+            res.json(messages);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // ==========================================================================
+    // Debug (development/test only)
     // ==========================================================================
 
     if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-        router.get('/admin/profile', (_req: Request, res: Response) => {
-            try {
-                const db = getDb();
-                const signals = getAllSignalsForAdmin();
-                const values = db.prepare(`SELECT * FROM user_values ORDER BY confidence DESC`).all() as Value[];
-                const challenges = db.prepare(`SELECT * FROM challenges ORDER BY mention_count DESC`).all() as Challenge[];
-                const goals = getAllGoals();
-                const maslowSignals = db.prepare(`SELECT * FROM maslow_signals ORDER BY created_at DESC`).all() as MaslowSignal[];
-                res.json({ signals, values, challenges, goals, maslowSignals });
-            } catch (err) {
-                res.status(500).json({ error: String(err) });
-            }
-        });
-
-        router.get('/admin/evidence/:dimension', (req: Request, res: Response) => {
-            try {
-                res.json(getEvidenceForDimension(getParam(req.params, 'dimension')));
-            } catch (err) {
-                res.status(500).json({ error: String(err) });
-            }
-        });
-
         router.post('/debug/clear-database', (_req: Request, res: Response) => {
             try {
                 const db = getDb();
