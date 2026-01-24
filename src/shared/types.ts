@@ -615,3 +615,25 @@ export interface ResetAfterResult {
     deletedCount?: number;
     error?: string;
 }
+
+// =============================================================================
+// Multi-User Types (Phase 10)
+// =============================================================================
+
+export interface User {
+    id: string;
+    name: string;
+    avatar_color: string;
+    created_at: string;
+    last_active_at: string;
+}
+
+export interface MigrationStatus {
+    pending: boolean;
+    counts: {
+        conversations: number;
+        values: number;
+        challenges: number;
+        goals: number;
+    };
+}

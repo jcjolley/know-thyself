@@ -7,12 +7,16 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { ensureTestUser } from './test-helpers';
 
 // Configure base URL - can be overridden via env var
 const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
 
 test.describe('Thinking Indicator - Web App', () => {
-    test.beforeEach(async ({ page }) => {
+    test.beforeEach(async ({ page, request }) => {
+        // Ensure a test user exists (needed for multi-user support)
+        await ensureTestUser(request);
+
         await page.goto(BASE_URL);
         // Wait for the app to load
         await page.waitForSelector('h1:has-text("The Mirror")', { timeout: 10000 });
@@ -122,7 +126,10 @@ test.describe('Thinking Indicator - Web App', () => {
 });
 
 test.describe('Thinking Indicator - Animation Properties', () => {
-    test.beforeEach(async ({ page }) => {
+    test.beforeEach(async ({ page, request }) => {
+        // Ensure a test user exists (needed for multi-user support)
+        await ensureTestUser(request);
+
         await page.goto(BASE_URL);
         await page.waitForSelector('h1:has-text("The Mirror")', { timeout: 10000 });
     });

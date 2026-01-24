@@ -78,6 +78,122 @@ function runMigrations(database: Database.Database): void {
         console.log('Migration: Adding journey_id column to conversations table');
         database.exec(`ALTER TABLE conversations ADD COLUMN journey_id TEXT`);
     }
+
+    // Multi-user support migrations (Phase 10)
+    runMultiUserMigrations(database);
+}
+
+/**
+ * Multi-user support migrations (Phase 10).
+ * Adds users table, app_settings table, and user_id columns to data tables.
+ */
+function runMultiUserMigrations(database: Database.Database): void {
+    // Check if users table exists
+    const tables = database.prepare(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='users'
+    `).get();
+
+    if (!tables) {
+        console.log('Migration: Creating users table');
+        database.exec(`
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                avatar_color TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+    }
+
+    // Check if app_settings table exists
+    const appSettingsTable = database.prepare(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'
+    `).get();
+
+    if (!appSettingsTable) {
+        console.log('Migration: Creating app_settings table');
+        database.exec(`
+            CREATE TABLE app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        `);
+    }
+
+    // Add user_id column to tables that need it
+    const tablesToMigrate = [
+        'conversations',
+        'user_values',
+        'challenges',
+        'goals',
+        'activities',
+        'maslow_signals',
+        'psychological_signals',
+    ];
+
+    for (const tableName of tablesToMigrate) {
+        const tableInfo = database.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
+        const hasUserId = tableInfo.some(col => col.name === 'user_id');
+
+        if (!hasUserId) {
+            console.log(`Migration: Adding user_id column to ${tableName} table`);
+            database.exec(`ALTER TABLE ${tableName} ADD COLUMN user_id TEXT REFERENCES users(id)`);
+            // Create index for efficient user-scoped queries
+            database.exec(`CREATE INDEX IF NOT EXISTS idx_${tableName}_user_id ON ${tableName}(user_id)`);
+        }
+    }
+
+    // Handle profile_summary specially - it uses id=1 singleton pattern, needs different approach
+    // We'll change it to use user_id as the key instead of singleton id
+    const profileSummaryInfo = database.prepare(`PRAGMA table_info(profile_summary)`).all() as { name: string }[];
+    const profileHasUserId = profileSummaryInfo.some(col => col.name === 'user_id');
+
+    if (!profileHasUserId) {
+        console.log('Migration: Migrating profile_summary to multi-user');
+        // profile_summary has a CHECK constraint on id=1, so we need to recreate it
+        // First, save existing data
+        const existingData = database.prepare(`SELECT * FROM profile_summary WHERE id = 1`).get() as {
+            computed_json?: string;
+            narrative_json?: string;
+            computed_at?: string;
+            narrative_generated_at?: string;
+        } | undefined;
+
+        // Drop the old table
+        database.exec(`DROP TABLE IF EXISTS profile_summary`);
+
+        // Create new table with user_id as primary key
+        database.exec(`
+            CREATE TABLE profile_summary (
+                user_id TEXT PRIMARY KEY REFERENCES users(id),
+                computed_json TEXT NOT NULL,
+                narrative_json TEXT,
+                computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                narrative_generated_at TIMESTAMP
+            )
+        `);
+
+        // If there was existing data, insert it with NULL user_id (will be claimed during migration)
+        if (existingData) {
+            // We can't insert with NULL user_id as primary key, so we'll store as orphan marker
+            database.prepare(`
+                INSERT INTO app_settings (key, value) VALUES ('orphan_profile_summary', ?)
+            `).run(JSON.stringify(existingData));
+        }
+    }
+
+    // Check for orphan data (data without user_id) and set migration_pending flag
+    const orphanConversations = database.prepare(`
+        SELECT COUNT(*) as count FROM conversations WHERE user_id IS NULL
+    `).get() as { count: number };
+
+    if (orphanConversations.count > 0) {
+        console.log(`Migration: Found ${orphanConversations.count} orphan conversations, setting migration_pending flag`);
+        database.prepare(`
+            INSERT OR REPLACE INTO app_settings (key, value) VALUES ('migration_pending', 'true')
+        `).run();
+    }
 }
 
 const SCHEMA = `

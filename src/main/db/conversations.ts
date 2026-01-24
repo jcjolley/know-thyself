@@ -28,9 +28,34 @@ export interface ConversationSearchResult {
 /**
  * List all conversations with metadata (title, message count, preview).
  * Sorted by most recently updated first.
+ * @param userId - If provided, only return conversations for this user.
  */
-export function listConversations(): ConversationListItem[] {
+export function listConversations(userId?: string): ConversationListItem[] {
     const db = getDb();
+
+    if (userId) {
+        return db.prepare(`
+            SELECT
+                c.id,
+                COALESCE(c.title, 'New Conversation') as title,
+                c.created_at,
+                c.updated_at,
+                c.journey_id,
+                COUNT(m.id) as message_count,
+                (
+                    SELECT SUBSTR(content, 1, 60)
+                    FROM messages
+                    WHERE conversation_id = c.id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) as preview
+            FROM conversations c
+            LEFT JOIN messages m ON m.conversation_id = c.id
+            WHERE c.user_id = ?
+            GROUP BY c.id
+            ORDER BY c.updated_at DESC
+        `).all(userId) as ConversationListItem[];
+    }
 
     return db.prepare(`
         SELECT
@@ -57,18 +82,21 @@ export function listConversations(): ConversationListItem[] {
 /**
  * Create a new empty conversation.
  * Optionally specify a journey_id for guided journey conversations.
+ * @param title - Conversation title
+ * @param journeyId - Optional journey ID for guided conversations
+ * @param userId - Optional user ID to associate with the conversation
  */
-export function createConversation(title: string = 'New Conversation', journeyId?: string): Conversation & { title: string; journey_id: string | null } {
+export function createConversation(title: string = 'New Conversation', journeyId?: string, userId?: string): Conversation & { title: string; journey_id: string | null; user_id: string | null } {
     const db = getDb();
     const id = uuidv4();
     const now = new Date().toISOString();
 
     db.prepare(`
-        INSERT INTO conversations (id, title, journey_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-    `).run(id, title, journeyId || null, now, now);
+        INSERT INTO conversations (id, title, journey_id, user_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, title, journeyId || null, userId || null, now, now);
 
-    return { id, title, journey_id: journeyId || null, created_at: now, updated_at: now };
+    return { id, title, journey_id: journeyId || null, user_id: userId || null, created_at: now, updated_at: now };
 }
 
 /**
@@ -159,10 +187,36 @@ export function deleteConversation(id: string): boolean {
 
 /**
  * Search conversations by title and message content.
+ * @param query - Search query string
+ * @param userId - If provided, only search conversations for this user
  */
-export function searchConversations(query: string): ConversationSearchResult[] {
+export function searchConversations(query: string, userId?: string): ConversationSearchResult[] {
     const db = getDb();
     const pattern = `%${query}%`;
+
+    if (userId) {
+        return db.prepare(`
+            SELECT DISTINCT
+                c.id,
+                COALESCE(c.title, 'New Conversation') as title,
+                c.updated_at,
+                COALESCE(
+                    (
+                        SELECT SUBSTR(content, 1, 80)
+                        FROM messages
+                        WHERE conversation_id = c.id AND content LIKE ?
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    ),
+                    COALESCE(c.title, 'New Conversation')
+                ) as match_context
+            FROM conversations c
+            LEFT JOIN messages m ON m.conversation_id = c.id
+            WHERE c.user_id = ? AND (COALESCE(c.title, '') LIKE ? OR m.content LIKE ?)
+            ORDER BY c.updated_at DESC
+            LIMIT 50
+        `).all(pattern, userId, pattern, pattern) as ConversationSearchResult[];
+    }
 
     return db.prepare(`
         SELECT DISTINCT
@@ -234,9 +288,22 @@ export function generateTitleFromMessage(message: string): string {
 
 /**
  * Get the most recent conversation (for backwards compatibility).
+ * @param userId - If provided, only return conversations for this user
  */
-export function getMostRecentConversation(): (Conversation & { title: string; journey_id: string | null }) | null {
+export function getMostRecentConversation(userId?: string): (Conversation & { title: string; journey_id: string | null }) | null {
     const db = getDb();
+
+    if (userId) {
+        const conversation = db.prepare(`
+            SELECT id, COALESCE(title, 'New Conversation') as title, journey_id, created_at, updated_at
+            FROM conversations
+            WHERE user_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+        `).get(userId) as (Conversation & { title: string; journey_id: string | null }) | undefined;
+
+        return conversation || null;
+    }
 
     const conversation = db.prepare(`
         SELECT id, COALESCE(title, 'New Conversation') as title, journey_id, created_at, updated_at

@@ -12,6 +12,9 @@ import {
 } from "./components/ConversationSidebar";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import { ApiProvider, useApi } from "./contexts/ApiContext";
+import { UserProvider, useUser } from "./contexts/UserContext";
+import { CreateUserModal } from "./components/CreateUserModal";
+import { MigrationPrompt } from "./components/MigrationPrompt";
 import type { TabId } from "./components/TabNavigation";
 import type { ApiKeyStatus } from "../shared/types";
 
@@ -20,11 +23,14 @@ const SIDEBAR_COLLAPSED_KEY = "know-thyself:sidebar-collapsed";
 function AppContent() {
   const { theme } = useTheme();
   const api = useApi();
+  const { users, isLoading: isUserLoading, migrationStatus, hasPendingMigration, claimLegacyData, refreshUsers } = useUser();
   const [activeTab, setActiveTab] = useState<TabId>("chat");
 
   // API Key state
   const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [showMigrationPrompt, setShowMigrationPrompt] = useState(false);
 
   // Conversation state
   const [conversations, setConversations] = useState<ConversationListItem[]>(
@@ -200,6 +206,34 @@ function AppContent() {
     api.apiKey.getStatus().then(setApiKeyStatus);
   }, [api]);
 
+  // Handler: Create user complete
+  const handleCreateUserComplete = useCallback(async (_userId: string) => {
+    setShowCreateUser(false);
+    await refreshUsers();
+    // Check if there's pending migration data
+    if (hasPendingMigration) {
+      setShowMigrationPrompt(true);
+    }
+  }, [refreshUsers, hasPendingMigration]);
+
+  // Handler: Add profile from user switcher
+  const handleAddProfile = useCallback(() => {
+    setShowCreateUser(true);
+  }, []);
+
+  // Handler: Claim migration data
+  const handleClaimMigration = useCallback(async () => {
+    await claimLegacyData();
+    setShowMigrationPrompt(false);
+    // Reload the page to refresh all data
+    window.location.reload();
+  }, [claimLegacyData]);
+
+  // Handler: Skip migration (start fresh)
+  const handleSkipMigration = useCallback(() => {
+    setShowMigrationPrompt(false);
+  }, []);
+
   // Determine background color based on active tab
   const getBackgroundColor = () => {
     switch (activeTab) {
@@ -210,8 +244,8 @@ function AppContent() {
     }
   };
 
-  // Show loading state while checking API key
-  if (apiKeyStatus === null) {
+  // Show loading state while checking API key or users
+  if (apiKeyStatus === null || isUserLoading) {
     return (
       <div
         style={{
@@ -234,6 +268,37 @@ function AppContent() {
     return <ApiKeySetup onComplete={handleApiKeySetupComplete} />;
   }
 
+  // Show create user screen if no users exist (fresh install)
+  if (users.length === 0) {
+    return (
+      <CreateUserModal
+        isFullScreen
+        onComplete={handleCreateUserComplete}
+      />
+    );
+  }
+
+  // Show migration prompt if user just created and there's pending data
+  if (showMigrationPrompt && migrationStatus) {
+    return (
+      <MigrationPrompt
+        migrationStatus={migrationStatus}
+        onClaimData={handleClaimMigration}
+        onStartFresh={handleSkipMigration}
+      />
+    );
+  }
+
+  // Show create user modal (adding additional profile)
+  if (showCreateUser) {
+    return (
+      <CreateUserModal
+        onComplete={handleCreateUserComplete}
+        onCancel={() => setShowCreateUser(false)}
+      />
+    );
+  }
+
   return (
     <div
       style={{
@@ -248,6 +313,8 @@ function AppContent() {
         onTabChange={setActiveTab}
         showAdminTab={showAdminTab}
         onSettingsClick={handleOpenSettings}
+        onAddProfile={handleAddProfile}
+        showUserSwitcher={users.length > 0}
       />
       {showSettings && (
         <SettingsPanel onClose={() => setShowSettings(false)} />
@@ -288,7 +355,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <ApiProvider>
-        <AppContent />
+        <UserProvider>
+          <AppContent />
+        </UserProvider>
       </ApiProvider>
     </ThemeProvider>
   );

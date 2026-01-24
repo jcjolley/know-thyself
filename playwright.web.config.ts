@@ -42,12 +42,13 @@ export default defineConfig({
     globalSetup: './tests/web/global-setup.ts',
     // Optionally start the web server before tests with test data directory
     webServer: process.env.START_SERVER ? {
-        command: `DATA_DIR=${TEST_DATA_DIR} npm start`,
+        command: `DATA_DIR=${TEST_DATA_DIR} MOCK_CLAUDE=true npm start`,
         url: 'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
         timeout: 30000,
         env: {
             DATA_DIR: TEST_DATA_DIR,
+            MOCK_CLAUDE: 'true',  // Use mock LLM responses for fast, reliable tests
         },
     } : undefined,
 });

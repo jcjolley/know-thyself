@@ -7,11 +7,15 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { ensureTestUser } from './test-helpers';
 
 const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
 
 test.describe('US-001: Reset Conversation After Message', () => {
-    test.beforeEach(async ({ page }) => {
+    test.beforeEach(async ({ page, request }) => {
+        // Ensure a test user exists (needed for multi-user support)
+        await ensureTestUser(request);
+
         await page.goto(BASE_URL);
         await page.waitForSelector('h1:has-text("The Mirror")', { timeout: 10000 });
     });
@@ -38,7 +42,10 @@ test.describe('US-001: Reset Conversation After Message', () => {
 });
 
 test.describe('US-002: Regenerate Assistant Response', () => {
-    test.beforeEach(async ({ page }) => {
+    test.beforeEach(async ({ page, request }) => {
+        // Ensure a test user exists (needed for multi-user support)
+        await ensureTestUser(request);
+
         await page.goto(BASE_URL);
         await page.waitForSelector('h1:has-text("The Mirror")', { timeout: 10000 });
     });
@@ -94,7 +101,10 @@ test.describe('US-005: Touch/Mobile Support', () => {
 });
 
 test.describe('Message Reset - Animation Properties', () => {
-    test.beforeEach(async ({ page }) => {
+    test.beforeEach(async ({ page, request }) => {
+        // Ensure a test user exists (needed for multi-user support)
+        await ensureTestUser(request);
+
         await page.goto(BASE_URL);
         await page.waitForSelector('h1:has-text("The Mirror")', { timeout: 10000 });
     });

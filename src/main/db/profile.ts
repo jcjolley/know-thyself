@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from './sqlite.js';
+import { getCurrentUser } from '../../server/session.js';
 import type {
     ExtractedLifeSituation,
     ExtractedIntent,
@@ -511,68 +512,132 @@ export function getUserMessagesForConversation(conversationId: string): { id: st
 // Profile Summary for Self-Portrait View (Phase 3)
 // =============================================================================
 
-export function getFullProfileSummary(): FullProfileSummary {
+/**
+ * Get the full profile summary for display.
+ * @param userId - If provided, only return profile data for this user
+ */
+export function getFullProfileSummary(userId?: string): FullProfileSummary {
     const db = getDb();
 
     // Get counts for each category
-    const valuesCount = (db.prepare(`SELECT COUNT(*) as count FROM user_values`).get() as { count: number }).count;
-    const challengesCount = (db.prepare(`SELECT COUNT(*) as count FROM challenges WHERE status = 'active'`).get() as { count: number }).count;
-    const goalsCount = (db.prepare(`SELECT COUNT(*) as count FROM goals WHERE status IN ('stated', 'in_progress')`).get() as { count: number }).count;
-    const signalsCount = (db.prepare(`SELECT COUNT(*) as count FROM psychological_signals`).get() as { count: number }).count;
+    const valuesCount = userId
+        ? (db.prepare(`SELECT COUNT(*) as count FROM user_values WHERE user_id = ?`).get(userId) as { count: number }).count
+        : (db.prepare(`SELECT COUNT(*) as count FROM user_values`).get() as { count: number }).count;
+
+    const challengesCount = userId
+        ? (db.prepare(`SELECT COUNT(*) as count FROM challenges WHERE status = 'active' AND user_id = ?`).get(userId) as { count: number }).count
+        : (db.prepare(`SELECT COUNT(*) as count FROM challenges WHERE status = 'active'`).get() as { count: number }).count;
+
+    const goalsCount = userId
+        ? (db.prepare(`SELECT COUNT(*) as count FROM goals WHERE status IN ('stated', 'in_progress') AND user_id = ?`).get(userId) as { count: number }).count
+        : (db.prepare(`SELECT COUNT(*) as count FROM goals WHERE status IN ('stated', 'in_progress')`).get() as { count: number }).count;
+
+    const signalsCount = userId
+        ? (db.prepare(`SELECT COUNT(*) as count FROM psychological_signals WHERE user_id = ?`).get(userId) as { count: number }).count
+        : (db.prepare(`SELECT COUNT(*) as count FROM psychological_signals`).get() as { count: number }).count;
 
     // Get actual values (top 10 by confidence)
-    const values = db.prepare(`
-        SELECT id, name, description, confidence
-        FROM user_values
-        ORDER BY confidence DESC, last_reinforced DESC
-        LIMIT 10
-    `).all() as ProfileValueItem[];
+    const values = userId
+        ? db.prepare(`
+            SELECT id, name, description, confidence
+            FROM user_values
+            WHERE user_id = ?
+            ORDER BY confidence DESC, last_reinforced DESC
+            LIMIT 10
+        `).all(userId) as ProfileValueItem[]
+        : db.prepare(`
+            SELECT id, name, description, confidence
+            FROM user_values
+            ORDER BY confidence DESC, last_reinforced DESC
+            LIMIT 10
+        `).all() as ProfileValueItem[];
 
     // Get actual challenges (active ones)
-    const challenges = db.prepare(`
-        SELECT id, description, status
-        FROM challenges
-        WHERE status = 'active'
-        ORDER BY last_mentioned DESC
-        LIMIT 10
-    `).all() as ProfileChallengeItem[];
+    const challenges = userId
+        ? db.prepare(`
+            SELECT id, description, status
+            FROM challenges
+            WHERE status = 'active' AND user_id = ?
+            ORDER BY last_mentioned DESC
+            LIMIT 10
+        `).all(userId) as ProfileChallengeItem[]
+        : db.prepare(`
+            SELECT id, description, status
+            FROM challenges
+            WHERE status = 'active'
+            ORDER BY last_mentioned DESC
+            LIMIT 10
+        `).all() as ProfileChallengeItem[];
 
     // Get actual goals (active ones)
-    const goals = db.prepare(`
-        SELECT id, description, status, timeframe
-        FROM goals
-        WHERE status IN ('stated', 'in_progress')
-        ORDER BY last_mentioned DESC
-        LIMIT 10
-    `).all() as ProfileGoalItem[];
+    const goals = userId
+        ? db.prepare(`
+            SELECT id, description, status, timeframe
+            FROM goals
+            WHERE status IN ('stated', 'in_progress') AND user_id = ?
+            ORDER BY last_mentioned DESC
+            LIMIT 10
+        `).all(userId) as ProfileGoalItem[]
+        : db.prepare(`
+            SELECT id, description, status, timeframe
+            FROM goals
+            WHERE status IN ('stated', 'in_progress')
+            ORDER BY last_mentioned DESC
+            LIMIT 10
+        `).all() as ProfileGoalItem[];
 
     // Get psychological signals (excluding intent patterns and life situation details)
-    const signals = db.prepare(`
-        SELECT id, dimension, value, confidence
-        FROM psychological_signals
-        WHERE dimension NOT LIKE 'intent.%'
-        AND dimension NOT LIKE 'life_situation.%'
-        ORDER BY confidence DESC, last_updated DESC
-        LIMIT 15
-    `).all() as ProfileSignalItem[];
+    const signals = userId
+        ? db.prepare(`
+            SELECT id, dimension, value, confidence
+            FROM psychological_signals
+            WHERE dimension NOT LIKE 'intent.%'
+            AND dimension NOT LIKE 'life_situation.%'
+            AND user_id = ?
+            ORDER BY confidence DESC, last_updated DESC
+            LIMIT 15
+        `).all(userId) as ProfileSignalItem[]
+        : db.prepare(`
+            SELECT id, dimension, value, confidence
+            FROM psychological_signals
+            WHERE dimension NOT LIKE 'intent.%'
+            AND dimension NOT LIKE 'life_situation.%'
+            ORDER BY confidence DESC, last_updated DESC
+            LIMIT 15
+        `).all() as ProfileSignalItem[];
 
     // Get Maslow concerns (deduplicated by level)
-    const maslowSignals = db.prepare(`
-        SELECT level, MAX(description) as description
-        FROM maslow_signals
-        WHERE signal_type = 'concern'
-        GROUP BY level
-        ORDER BY MAX(created_at) DESC
-        LIMIT 5
-    `).all() as { level: string; description: string | null }[];
+    const maslowSignals = userId
+        ? db.prepare(`
+            SELECT level, MAX(description) as description
+            FROM maslow_signals
+            WHERE signal_type = 'concern' AND user_id = ?
+            GROUP BY level
+            ORDER BY MAX(created_at) DESC
+            LIMIT 5
+        `).all(userId) as { level: string; description: string | null }[]
+        : db.prepare(`
+            SELECT level, MAX(description) as description
+            FROM maslow_signals
+            WHERE signal_type = 'concern'
+            GROUP BY level
+            ORDER BY MAX(created_at) DESC
+            LIMIT 5
+        `).all() as { level: string; description: string | null }[];
     const maslowConcerns = maslowSignals.map(s => s.level);
 
     // Get narrative summary from profile_summary table if it exists
-    const summaryRow = db.prepare(`SELECT * FROM profile_summary WHERE id = 1`).get() as {
-        computed_json?: string;
-        narrative_json?: string;
-        narrative_generated_at?: string;
-    } | undefined;
+    const summaryRow = userId
+        ? db.prepare(`SELECT * FROM profile_summary WHERE user_id = ?`).get(userId) as {
+            computed_json?: string;
+            narrative_json?: string;
+            narrative_generated_at?: string;
+        } | undefined
+        : db.prepare(`SELECT * FROM profile_summary LIMIT 1`).get() as {
+            computed_json?: string;
+            narrative_json?: string;
+            narrative_generated_at?: string;
+        } | undefined;
 
     let narrativeSummary: {
         identity_summary?: string;
@@ -596,9 +661,16 @@ export function getFullProfileSummary(): FullProfileSummary {
     const hasData = valuesCount > 0 || challengesCount > 0 || goalsCount > 0 || signalsCount > 0 || maslowSignals.length > 0;
 
     // Get the most recent update timestamp
-    const latestMessage = db.prepare(`
-        SELECT created_at FROM messages ORDER BY created_at DESC LIMIT 1
-    `).get() as { created_at: string } | undefined;
+    const latestMessage = userId
+        ? db.prepare(`
+            SELECT m.created_at FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE c.user_id = ?
+            ORDER BY m.created_at DESC LIMIT 1
+        `).get(userId) as { created_at: string } | undefined
+        : db.prepare(`
+            SELECT created_at FROM messages ORDER BY created_at DESC LIMIT 1
+        `).get() as { created_at: string } | undefined;
 
     return {
         // Narrative (from LLM synthesis, may be null)
@@ -634,39 +706,47 @@ export function getFullProfileSummary(): FullProfileSummary {
 // =============================================================================
 
 /**
- * Initialize profile_summary row if it doesn't exist.
- * Uses id=1 singleton pattern.
+ * Initialize profile_summary row if it doesn't exist for the current user.
  */
 export function ensureProfileSummaryRow(): void {
+    const userId = getCurrentUser();
+    if (!userId) return;  // No user selected
+
     const db = getDb();
     db.prepare(`
-        INSERT OR IGNORE INTO profile_summary (id, computed_json)
-        VALUES (1, '{}')
-    `).run();
+        INSERT OR IGNORE INTO profile_summary (user_id, computed_json)
+        VALUES (?, '{}')
+    `).run(userId);
 }
 
 /**
- * Save narrative summary to profile_summary table.
+ * Save narrative summary to profile_summary table for the current user.
  */
 export function saveNarrativeSummary(narrative: NarrativeSummary): void {
+    const userId = getCurrentUser();
+    if (!userId) return;  // No user selected
+
     const db = getDb();
     const now = new Date().toISOString();
     ensureProfileSummaryRow();
     db.prepare(`
         UPDATE profile_summary
         SET narrative_json = ?, narrative_generated_at = ?
-        WHERE id = 1
-    `).run(JSON.stringify(narrative), now);
+        WHERE user_id = ?
+    `).run(JSON.stringify(narrative), now, userId);
 }
 
 /**
- * Get existing narrative if any.
+ * Get existing narrative if any for the current user.
  */
 export function getExistingNarrative(): NarrativeSummary | null {
+    const userId = getCurrentUser();
+    if (!userId) return null;  // No user selected
+
     const db = getDb();
     const row = db.prepare(`
-        SELECT narrative_json FROM profile_summary WHERE id = 1
-    `).get() as { narrative_json: string | null } | undefined;
+        SELECT narrative_json FROM profile_summary WHERE user_id = ?
+    `).get(userId) as { narrative_json: string | null } | undefined;
 
     if (!row?.narrative_json) return null;
     try {
@@ -691,12 +771,15 @@ export function countMessagesSince(timestamp: string | null): number {
 }
 
 /**
- * Get timestamp of last narrative generation.
+ * Get timestamp of last narrative generation for the current user.
  */
 export function getNarrativeGeneratedAt(): string | null {
+    const userId = getCurrentUser();
+    if (!userId) return null;  // No user selected
+
     const db = getDb();
     const row = db.prepare(`
-        SELECT narrative_generated_at FROM profile_summary WHERE id = 1
-    `).get() as { narrative_generated_at: string | null } | undefined;
+        SELECT narrative_generated_at FROM profile_summary WHERE user_id = ?
+    `).get(userId) as { narrative_generated_at: string | null } | undefined;
     return row?.narrative_generated_at ?? null;
 }

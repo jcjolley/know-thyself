@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ApiKeySetup } from './ApiKeySetup';
 import { BackendSettings } from './BackendSettings';
-import type { ApiKeyStatus, LLMConfig } from '../../shared/types';
+import { DeleteUserConfirm } from './DeleteUserConfirm';
+import type { ApiKeyStatus, LLMConfig, User } from '../../shared/types';
 import { useTheme, type ThemeMode } from '../contexts/ThemeContext';
 import { useApi } from '../contexts/ApiContext';
+import { useUser } from '../contexts/UserContext';
 
 interface SettingsPanelProps {
     onClose: () => void;
@@ -12,10 +14,13 @@ interface SettingsPanelProps {
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const { theme, isDark, mode, setMode } = useTheme();
     const api = useApi();
+    const { currentUser, users, deleteUser } = useUser();
     const [status, setStatus] = useState<ApiKeyStatus | null>(null);
     const [llmConfig, setLlmConfig] = useState<LLMConfig | null>(null);
     const [showUpdateModal, setShowUpdateModal] = useState(false);
     const [isVisible, setIsVisible] = useState(false);
+    const [userToDelete, setUserToDelete] = useState<User | null>(null);
+    const [conversationCounts, setConversationCounts] = useState<Record<string, number>>({});
 
     // Load status on mount
     useEffect(() => {
@@ -56,6 +61,43 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         setShowUpdateModal(false);
         setStatus(await api.apiKey.getStatus());
     }, [api]);
+
+    const handleDeleteUser = useCallback(async () => {
+        if (!userToDelete) return;
+        await deleteUser(userToDelete.id);
+        setUserToDelete(null);
+        // Reload page if we deleted a user to refresh state
+        window.location.reload();
+    }, [userToDelete, deleteUser]);
+
+    // Load conversation counts for each user (for delete confirmation)
+    useEffect(() => {
+        const loadCounts = async () => {
+            const counts: Record<string, number> = {};
+            for (const user of users) {
+                try {
+                    // We'll use a simple estimate based on the user's conversations
+                    const conversations = await api.conversations.list();
+                    counts[user.id] = Array.isArray(conversations) ? conversations.length : 0;
+                } catch {
+                    counts[user.id] = 0;
+                }
+            }
+            setConversationCounts(counts);
+        };
+        if (users.length > 0) {
+            loadCounts();
+        }
+    }, [users, api]);
+
+    const getInitials = (name: string) => {
+        return name
+            .split(' ')
+            .map(part => part[0])
+            .join('')
+            .toUpperCase()
+            .slice(0, 2);
+    };
 
     const overlayStyle: React.CSSProperties = {
         position: 'fixed',
@@ -436,6 +478,119 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                             </div>
                         </div>
 
+                        {/* Profile Management Section */}
+                        {users.length > 0 && (
+                            <div style={sectionStyle}>
+                                <div style={sectionTitleStyle}>Profiles</div>
+                                <div style={cardStyle}>
+                                    <div style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: 12,
+                                    }}>
+                                        {users.map((user) => {
+                                            const isCurrentUser = currentUser?.id === user.id;
+                                            return (
+                                                <div
+                                                    key={user.id}
+                                                    style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'space-between',
+                                                        padding: 12,
+                                                        background: isDark ? theme.colors.background : 'rgba(139, 129, 120, 0.05)',
+                                                        borderRadius: 8,
+                                                        border: isCurrentUser ? `1px solid ${theme.colors.accent}` : `1px solid ${theme.colors.border}`,
+                                                    }}
+                                                >
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                                        {/* Avatar */}
+                                                        <div
+                                                            style={{
+                                                                width: 36,
+                                                                height: 36,
+                                                                borderRadius: '50%',
+                                                                background: user.avatar_color,
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                fontFamily: 'Georgia, "Times New Roman", serif',
+                                                                fontSize: 14,
+                                                                fontWeight: 500,
+                                                                color: 'rgba(255, 255, 255, 0.9)',
+                                                                boxShadow: 'inset 0 1px 3px rgba(0, 0, 0, 0.2)',
+                                                            }}
+                                                        >
+                                                            {getInitials(user.name)}
+                                                        </div>
+                                                        {/* Name and status */}
+                                                        <div>
+                                                            <div style={{
+                                                                fontFamily: 'Georgia, "Times New Roman", serif',
+                                                                fontSize: 15,
+                                                                color: theme.colors.textPrimary,
+                                                            }}>
+                                                                {user.name}
+                                                            </div>
+                                                            {isCurrentUser && (
+                                                                <div style={{
+                                                                    fontFamily: 'system-ui, -apple-system, sans-serif',
+                                                                    fontSize: 11,
+                                                                    color: theme.colors.accent,
+                                                                    marginTop: 2,
+                                                                }}>
+                                                                    Current profile
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {/* Delete button - disabled for current user */}
+                                                    <button
+                                                        onClick={() => !isCurrentUser && setUserToDelete(user)}
+                                                        disabled={isCurrentUser}
+                                                        title={isCurrentUser ? 'Cannot delete current profile' : 'Delete profile'}
+                                                        style={{
+                                                            background: 'transparent',
+                                                            border: 'none',
+                                                            padding: 8,
+                                                            cursor: isCurrentUser ? 'not-allowed' : 'pointer',
+                                                            color: isCurrentUser ? theme.colors.textMuted : theme.colors.error,
+                                                            opacity: isCurrentUser ? 0.4 : 0.7,
+                                                            borderRadius: 6,
+                                                            transition: 'all 150ms ease',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            if (!isCurrentUser) {
+                                                                e.currentTarget.style.opacity = '1';
+                                                                e.currentTarget.style.background = 'rgba(196, 90, 74, 0.1)';
+                                                            }
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            if (!isCurrentUser) {
+                                                                e.currentTarget.style.opacity = '0.7';
+                                                                e.currentTarget.style.background = 'transparent';
+                                                            }
+                                                        }}
+                                                    >
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                                            <polyline points="3 6 5 6 21 6" />
+                                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <p style={helpTextStyle}>
+                                        Switch between profiles using the dropdown in the header. To delete a profile, first switch to a different one.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
                         <div style={sectionStyle}>
                             <div style={sectionTitleStyle}>About</div>
                             <div style={cardStyle}>
@@ -457,6 +612,15 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     isModal
                     onComplete={handleUpdateComplete}
                     onCancel={() => setShowUpdateModal(false)}
+                />
+            )}
+
+            {userToDelete && (
+                <DeleteUserConfirm
+                    user={userToDelete}
+                    conversationCount={conversationCounts[userToDelete.id] ?? 0}
+                    onConfirm={handleDeleteUser}
+                    onCancel={() => setUserToDelete(null)}
                 />
             )}
         </>

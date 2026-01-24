@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { useTheme } from '../contexts/ThemeContext';
+import { UserSwitcher } from './UserSwitcher';
 
 interface TabNavigationProps {
     activeTab: 'chat' | 'journeys' | 'profile' | 'admin';
     onTabChange: (tab: 'chat' | 'journeys' | 'profile' | 'admin') => void;
     showAdminTab: boolean;
     onSettingsClick?: () => void;
+    onAddProfile?: () => void;
+    showUserSwitcher?: boolean;
 }
 
 export type TabId = 'chat' | 'journeys' | 'profile' | 'admin';
 
-export function TabNavigation({ activeTab, onTabChange, showAdminTab, onSettingsClick }: TabNavigationProps) {
+export function TabNavigation({ activeTab, onTabChange, showAdminTab, onSettingsClick, onAddProfile, showUserSwitcher = true }: TabNavigationProps) {
     const { theme, isDark } = useTheme();
     const [hoveredTab, setHoveredTab] = useState<TabId | null>(null);
 
@@ -198,8 +201,11 @@ export function TabNavigation({ activeTab, onTabChange, showAdminTab, onSettings
                 </div>
             </div>
 
-            {/* Right side: Debug badge + Settings */}
+            {/* Right side: User Switcher + Debug badge + Settings */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                {showUserSwitcher && onAddProfile && (
+                    <UserSwitcher onAddProfile={onAddProfile} />
+                )}
                 {showAdminTab && (
                     <span style={debugBadgeStyle}>
                         Debug

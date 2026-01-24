@@ -286,6 +286,25 @@ export const webApi = {
             fetchJson(`${API_BASE}/llm/ollama/models${baseUrl ? `?baseUrl=${encodeURIComponent(baseUrl)}` : ''}`),
     },
 
+    // User management (Phase 10)
+    users: {
+        list: () => fetchJson(`${API_BASE}/users`),
+        getCurrent: () => fetchJson(`${API_BASE}/users/current`),
+        getAvatarColors: () => fetchJson(`${API_BASE}/users/avatar-colors`),
+        create: (name: string, avatarColor?: string) =>
+            fetchJson(`${API_BASE}/users`, {
+                method: 'POST',
+                body: JSON.stringify({ name, avatarColor }),
+            }),
+        select: (userId: string) =>
+            fetchJson(`${API_BASE}/users/${userId}/select`, { method: 'POST' }),
+        delete: (userId: string) =>
+            fetchJson(`${API_BASE}/users/${userId}`, { method: 'DELETE' }).then(() => true),
+        getMigrationStatus: () => fetchJson(`${API_BASE}/migration/status`),
+        claimMigration: () =>
+            fetchJson(`${API_BASE}/migration/claim`, { method: 'POST' }),
+    },
+
     // Debug endpoints (development only)
     debug: {
         getExtractions: (messageId?: string) =>

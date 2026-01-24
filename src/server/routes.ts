@@ -32,8 +32,25 @@ import {
     getMessageById,
     getMessageCountAfter,
 } from '../main/db/messages.js';
-import { deleteMessageEmbeddings } from '../main/db/lancedb.js';
+import { deleteMessageEmbeddings, deleteUserEmbeddings } from '../main/db/lancedb.js';
 import type { MaslowSignal, Value, Challenge, RegenerateResult } from '../shared/types.js';
+import {
+    listUsers,
+    createUser,
+    getUserById,
+    deleteUser,
+    getMigrationStatus,
+    claimLegacyData,
+    getUserCount,
+    AVATAR_COLORS,
+} from '../main/db/users.js';
+import {
+    getCurrentUser,
+    setCurrentUser,
+    getCurrentUserProfile,
+    clearCurrentUser,
+} from './session.js';
+import { assignEmbeddingsToUser } from '../main/db/lancedb.js';
 
 export function setupRoutes(app: Express): void {
     const router = Router();
@@ -57,6 +74,161 @@ export function setupRoutes(app: Express): void {
             claudeReady: isClaudeReady(),
             error: getInitError(),
         });
+    });
+
+    // ==========================================================================
+    // Users (Phase 10)
+    // ==========================================================================
+
+    /**
+     * List all user profiles.
+     */
+    router.get('/users', (_req: Request, res: Response) => {
+        try {
+            res.json(listUsers());
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    /**
+     * Get the currently active user.
+     */
+    router.get('/users/current', (_req: Request, res: Response) => {
+        try {
+            const user = getCurrentUserProfile();
+            if (!user) {
+                res.json(null);
+                return;
+            }
+            res.json(user);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    /**
+     * Get available avatar colors.
+     */
+    router.get('/users/avatar-colors', (_req: Request, res: Response) => {
+        res.json(AVATAR_COLORS);
+    });
+
+    /**
+     * Create a new user profile.
+     */
+    router.post('/users', (req: Request, res: Response) => {
+        try {
+            const { name, avatarColor } = req.body;
+            if (!name || typeof name !== 'string' || name.trim().length === 0) {
+                res.status(400).json({ error: 'Name is required' });
+                return;
+            }
+            const user = createUser(name.trim(), avatarColor);
+            // Auto-select the new user
+            setCurrentUser(user.id);
+            res.json(user);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    /**
+     * Select a user (switch to their profile).
+     */
+    router.post('/users/:id/select', (req: Request, res: Response) => {
+        try {
+            const userId = getParam(req.params, 'id');
+            const user = getUserById(userId);
+            if (!user) {
+                res.status(404).json({ error: 'User not found' });
+                return;
+            }
+            setCurrentUser(userId);
+            res.json(user);
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    /**
+     * Delete a user profile.
+     * Cannot delete the currently active user.
+     */
+    router.delete('/users/:id', async (req: Request, res: Response) => {
+        try {
+            const userId = getParam(req.params, 'id');
+
+            // Check if trying to delete current user
+            const currentUserId = getCurrentUser();
+            if (userId === currentUserId) {
+                res.status(400).json({ error: 'Cannot delete the currently active user. Switch to another user first.' });
+                return;
+            }
+
+            const result = deleteUser(userId) as { success: boolean; error?: string; _messageIdsForCleanup?: string[] };
+            if (!result.success) {
+                res.status(404).json({ error: result.error || 'User not found' });
+                return;
+            }
+
+            // Cleanup LanceDB embeddings (async, don't block response)
+            if (result._messageIdsForCleanup && result._messageIdsForCleanup.length > 0) {
+                deleteUserEmbeddings(userId).catch(err => {
+                    console.error('[users] LanceDB cleanup failed:', err);
+                });
+            }
+
+            // If no users left, clear the session
+            if (getUserCount() === 0) {
+                clearCurrentUser();
+            }
+
+            res.status(204).send();
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    // ==========================================================================
+    // Migration (Phase 10)
+    // ==========================================================================
+
+    /**
+     * Get migration status (pending legacy data).
+     */
+    router.get('/migration/status', (_req: Request, res: Response) => {
+        try {
+            res.json(getMigrationStatus());
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
+    });
+
+    /**
+     * Claim legacy data for the current user.
+     */
+    router.post('/migration/claim', async (req: Request, res: Response) => {
+        try {
+            const userId = getCurrentUser();
+            if (!userId) {
+                res.status(400).json({ error: 'No user selected. Create or select a user first.' });
+                return;
+            }
+
+            const { messageIds } = claimLegacyData(userId);
+
+            // Update LanceDB embeddings (async)
+            if (messageIds.length > 0) {
+                assignEmbeddingsToUser(messageIds, userId).catch(err => {
+                    console.error('[migration] LanceDB update failed:', err);
+                });
+            }
+
+            res.json({ success: true, claimed: messageIds.length });
+        } catch (err) {
+            res.status(500).json({ error: String(err) });
+        }
     });
 
     // ==========================================================================
@@ -85,7 +257,8 @@ export function setupRoutes(app: Express): void {
 
     router.get('/conversations', (_req: Request, res: Response) => {
         try {
-            res.json(listConversations());
+            const userId = getCurrentUser();
+            res.json(listConversations(userId || undefined));
         } catch (err) {
             res.status(500).json({ error: String(err) });
         }
@@ -93,7 +266,8 @@ export function setupRoutes(app: Express): void {
 
     router.post('/conversations', (_req: Request, res: Response) => {
         try {
-            res.json(createConversation());
+            const userId = getCurrentUser();
+            res.json(createConversation('New Conversation', undefined, userId || undefined));
         } catch (err) {
             res.status(500).json({ error: String(err) });
         }
@@ -101,7 +275,8 @@ export function setupRoutes(app: Express): void {
 
     router.get('/conversations/current', (_req: Request, res: Response) => {
         try {
-            res.json(getMostRecentConversation());
+            const userId = getCurrentUser();
+            res.json(getMostRecentConversation(userId || undefined));
         } catch (err) {
             res.status(500).json({ error: String(err) });
         }
@@ -110,7 +285,8 @@ export function setupRoutes(app: Express): void {
     router.get('/conversations/search', (req: Request, res: Response) => {
         try {
             const query = req.query.q as string || '';
-            res.json(searchConversations(query));
+            const userId = getCurrentUser();
+            res.json(searchConversations(query, userId || undefined));
         } catch (err) {
             res.status(500).json({ error: String(err) });
         }
@@ -283,25 +459,47 @@ export function setupRoutes(app: Express): void {
     router.get('/profile', (_req: Request, res: Response) => {
         try {
             const db = getDb();
+            const userId = getCurrentUser();
 
-            const maslowSignals = db.prepare(`
-                SELECT * FROM maslow_signals
-                ORDER BY created_at DESC
-                LIMIT 10
-            `).all() as MaslowSignal[];
+            const maslowSignals = userId
+                ? db.prepare(`
+                    SELECT * FROM maslow_signals
+                    WHERE user_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 10
+                `).all(userId) as MaslowSignal[]
+                : db.prepare(`
+                    SELECT * FROM maslow_signals
+                    ORDER BY created_at DESC
+                    LIMIT 10
+                `).all() as MaslowSignal[];
 
-            const values = db.prepare(`
-                SELECT * FROM user_values
-                ORDER BY confidence DESC
-                LIMIT 5
-            `).all() as Value[];
+            const values = userId
+                ? db.prepare(`
+                    SELECT * FROM user_values
+                    WHERE user_id = ?
+                    ORDER BY confidence DESC
+                    LIMIT 5
+                `).all(userId) as Value[]
+                : db.prepare(`
+                    SELECT * FROM user_values
+                    ORDER BY confidence DESC
+                    LIMIT 5
+                `).all() as Value[];
 
-            const challenges = db.prepare(`
-                SELECT * FROM challenges
-                WHERE status = 'active'
-                ORDER BY mention_count DESC
-                LIMIT 5
-            `).all() as Challenge[];
+            const challenges = userId
+                ? db.prepare(`
+                    SELECT * FROM challenges
+                    WHERE status = 'active' AND user_id = ?
+                    ORDER BY mention_count DESC
+                    LIMIT 5
+                `).all(userId) as Challenge[]
+                : db.prepare(`
+                    SELECT * FROM challenges
+                    WHERE status = 'active'
+                    ORDER BY mention_count DESC
+                    LIMIT 5
+                `).all() as Challenge[];
 
             res.json({
                 maslow_status: maslowSignals,
@@ -315,7 +513,8 @@ export function setupRoutes(app: Express): void {
 
     router.get('/profile/summary', (_req: Request, res: Response) => {
         try {
-            res.json(getFullProfileSummary());
+            const userId = getCurrentUser();
+            res.json(getFullProfileSummary(userId || undefined));
         } catch (err) {
             res.status(500).json({ error: String(err) });
         }
@@ -399,7 +598,8 @@ export function setupRoutes(app: Express): void {
                 return;
             }
 
-            const conversation = createConversation(journey.title, journeyId);
+            const userId = getCurrentUser();
+            const conversation = createConversation(journey.title, journeyId, userId || undefined);
 
             // Generate opening message
             try {

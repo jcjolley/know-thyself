@@ -20,6 +20,7 @@ import { getRandomQuestionForAxis } from './question-bank.js';
 import type { AxisName } from './completeness.js';
 import { getJourney, type JourneyInfo } from './journeys.js';
 import { getConversationById } from './db/conversations.js';
+import { getCurrentUser } from '../server/session.js';
 
 // Minimum confidence to include a signal in context
 const MIN_CONFIDENCE = 0.5;
@@ -208,6 +209,7 @@ export async function assembleContext(
 
     // Step 5: Semantic search using plan's queries or the message itself
     let relevantMessages = '';
+    const userId = getCurrentUser();
     if (isEmbeddingsReady()) {
         try {
             // Use semantic queries from plan if available
@@ -218,7 +220,8 @@ export async function assembleContext(
             const allResults: { content: string; role: string }[] = [];
             for (const query of searchQueries.slice(0, 3)) {
                 const queryVector = await embed(query, 'query');
-                const results = await searchSimilarMessages(queryVector, 2);
+                // Filter by current user to ensure data isolation
+                const results = await searchSimilarMessages(queryVector, 2, userId || undefined);
                 allResults.push(...results);
             }
 

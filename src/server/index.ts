@@ -13,6 +13,7 @@ import { llmManager, createOllamaProvider, createClaudeProvider } from '../main/
 import { loadLLMConfig } from '../main/llm/storage.js';
 import { setupRoutes } from './routes.js';
 import { setupWebSocket } from './websocket.js';
+import { loadLastUser } from './session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -39,6 +40,10 @@ async function main() {
 
     console.log('[server] Initializing LanceDB...');
     await initLanceDB();
+
+    // Load user session
+    console.log('[server] Loading user session...');
+    loadLastUser();
 
     // Initialize LLM manager
     console.log('[server] Initializing LLM manager...');

@@ -48,6 +48,10 @@ export async function saveMessage(
         UPDATE conversations SET updated_at = ? WHERE id = ?
     `).run(now, conversationId);
 
+    // Get user_id from the conversation for embedding association
+    const conv = db.prepare(`SELECT user_id FROM conversations WHERE id = ?`).get(conversationId) as { user_id: string | null } | undefined;
+    const userId = conv?.user_id || undefined;
+
     // Embed and store in LanceDB (only if embeddings are ready and content is non-empty)
     if (isEmbeddingsReady() && content && content.trim().length > 0) {
         try {
@@ -58,7 +62,7 @@ export async function saveMessage(
                 content,
                 role,
                 created_at: now,
-            });
+            }, userId);
         } catch (err) {
             console.error('Failed to embed message:', err);
         }
